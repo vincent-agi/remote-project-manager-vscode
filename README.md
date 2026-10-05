@@ -66,7 +66,7 @@ This compiles the extension and runs `vsce package`, producing `remote-project-m
 
 ### Connect a repository
 
-1. Set `remoteProjectManager.repository` in your workspace settings (e.g. `"acme/widgets"`), **or** open a workspace whose git `origin` remote points at GitHub/GitLab — the extension detects it automatically.
+1. Set `remoteProjectManager.repository` in your workspace settings (e.g. `"acme/widgets"`), **or** open a workspace whose git `origin` remote points at GitHub/GitLab — the extension detects it automatically and keeps issues/milestones in sync when you switch project. The git remote takes precedence; the setting is only a fallback.
 2. Open the panel — click the **Remote Project Manager** icon in the Activity Bar, or run the **Remote Project Manager: Open Panel** command from the Command Palette.
 3. On first use with GitHub, VS Code will prompt you to sign in (native GitHub auth). On first use with GitLab, you'll be prompted to paste a Personal Access Token.
 
@@ -93,7 +93,7 @@ The "active issue" for these commands is resolved from your current branch name 
 | Setting                                       | Type                   | Default                             | Description                                                                                                                                                                        |
 | --------------------------------------------- | ---------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `remoteProjectManager.provider`               | `"github" \| "gitlab"` | `"github"`                          | Remote platform to connect to. Ignored when the repository is auto-detected from a git remote.                                                                                     |
-| `remoteProjectManager.repository`             | `string`               | `""`                                | Repository or project path, e.g. `"owner/repo"`. Leave empty to auto-detect from the workspace's git remotes.                                                                      |
+| `remoteProjectManager.repository`             | `string`               | `""`                                | Repository or project path, e.g. `"owner/repo"`. Fallback used only when no git remote is detected; the workspace's git remote always wins.                                        |
 | `remoteProjectManager.gitlabHost`             | `string`               | `""`                                | Hostname of a self-hosted GitLab instance (e.g. `"gitlab.example.com"`), used to both auto-detect repositories on that host and connect to its API. Leave empty to use gitlab.com. |
 | `remoteProjectManager.cacheTtlSeconds`        | `number`               | `180`                               | How long issue/milestone/capability reads are cached before refetching, in seconds. Use the panel's Refresh button to bypass the cache immediately.                                |
 | `remoteProjectManager.autoBranchOnInProgress` | `boolean`              | `true`                              | Automatically create and check out a git branch when an issue assigned to you moves to "in progress." When off, a suggested branch name is shown instead.                          |

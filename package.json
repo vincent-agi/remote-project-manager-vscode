@@ -107,7 +107,7 @@
         "remoteProjectManager.repository": {
           "type": "string",
           "default": "",
-          "description": "Repository or project path, e.g. 'owner/repo'."
+          "description": "Fallback repository or project path, e.g. 'owner/repo'. Only used when no workspace folder has a recognized git 'origin' remote; the detected remote always wins."
         },
         "remoteProjectManager.gitlabHost": {
           "type": "string",

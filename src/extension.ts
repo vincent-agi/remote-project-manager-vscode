@@ -13,8 +13,11 @@ import { GitlabProvider, type GitlabClient } from "./providers/gitlab/gitlab.pro
 import { CachingProjectProvider } from "./providers/caching-project-provider";
 import { SimpleGitService } from "./providers/git/simple-git.service";
 import {
+  chooseRepository,
+  repositoryKey,
   resolveRepositoryCandidates,
   type RepositoryCandidate,
+  type RepositoryResolution,
 } from "./core/workspace/repository-resolver";
 import { generateBranchName } from "./core/automation/branch-name";
 import { shouldAutoCreateBranch } from "./core/automation/auto-branch-guard";
@@ -129,30 +132,18 @@ function createPanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
 }
 
 /**
- * Resolves which repository to connect to: an explicit
- * `remoteProjectManager.repository` setting wins outright; otherwise
- * every workspace folder's `origin` remote is inspected (see ADR-0003).
+ * Resolves which repository to connect to: every workspace folder's
+ * `origin` remote is inspected first (see ADR-0003 and ADR-0007), and the
+ * `remoteProjectManager.repository` setting is only a fallback when none
+ * is recognized — so the issues shown always match the loaded code.
  * Returns a single resolved repository, or a list of candidates for the
  * webview picker when more than one workspace folder matches.
  */
-async function resolveRepository(): Promise<
-  | { kind: "resolved"; providerKind: ProviderKind; repository: string; folderPath?: string }
-  | { kind: "candidates"; candidates: RepositoryCandidate[] }
-  | { kind: "none" }
-> {
+async function resolveRepository(): Promise<RepositoryResolution> {
   const config = vscode.workspace.getConfiguration("remoteProjectManager");
   const providerKindSetting = config.get<ProviderKind>("provider", "github");
   const repositorySetting = config.get<string>("repository", "");
   const gitlabHost = config.get<string>("gitlabHost", "") || undefined;
-
-  if (repositorySetting.includes("/")) {
-    return {
-      kind: "resolved",
-      providerKind: providerKindSetting,
-      repository: repositorySetting,
-      folderPath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
-    };
-  }
 
   const gitService = new SimpleGitService();
   const folders = vscode.workspace.workspaceFolders ?? [];
@@ -163,20 +154,11 @@ async function resolveRepository(): Promise<
       remoteUrl: await gitService.getRemoteUrl(folder.uri.fsPath),
     })),
   );
-  const candidates = resolveRepositoryCandidates(remotes, gitlabHost);
-
-  if (candidates.length === 0) {
-    return { kind: "none" };
-  }
-  if (candidates.length === 1) {
-    return {
-      kind: "resolved",
-      providerKind: candidates[0].provider,
-      repository: candidates[0].repository,
-      folderPath: candidates[0].folderPath,
-    };
-  }
-  return { kind: "candidates", candidates };
+  return chooseRepository(resolveRepositoryCandidates(remotes, gitlabHost), {
+    provider: providerKindSetting,
+    repository: repositorySetting,
+    fallbackFolderPath: folders[0]?.uri.fsPath,
+  });
 }
 
 function toRepositoryOptionView(candidate: RepositoryCandidate): RepositoryOptionView {
@@ -470,6 +452,8 @@ let activeController: PanelController | undefined;
 let activeFolderPath: string | undefined;
 let activeProvider: IProjectProvider | undefined;
 let activeProviderKind: ProviderKind | undefined;
+/** {@link repositoryKey} of the resolution `activePanel` was built from, to detect a repository switch. */
+let activeRepositoryKey: string | undefined;
 
 /** A deferred UI action to apply once the panel (existing or freshly built) has a ready controller. */
 type PendingPanelAction =
@@ -561,9 +545,11 @@ async function openPanelImpl(
 
   const panel = createPanel(context);
   activePanel = panel;
+  activeRepositoryKey = repositoryKey(resolution);
   panel.onDidDispose(() => {
     if (activePanel === panel) {
       activePanel = undefined;
+      activeRepositoryKey = undefined;
       activeController = undefined;
       activeFolderPath = undefined;
       activeProvider = undefined;
@@ -672,6 +658,7 @@ async function openPanelImpl(
  */
 class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary> {
   private connection: { provider: IProjectProvider; currentUser: IAuthenticatedUser } | undefined;
+  private connectionKey: string | undefined;
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
@@ -684,6 +671,12 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
    */
   invalidateConnection(): void {
     this.connection = undefined;
+    this.connectionKey = undefined;
+    this.changeEmitter.fire();
+  }
+
+  /** Re-renders the tree (re-resolving the repository) without dropping a still-valid connection. */
+  refresh(): void {
     this.changeEmitter.fire();
   }
 
@@ -725,10 +718,15 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
   private async getConnection(): Promise<
     { provider: IProjectProvider; currentUser: IAuthenticatedUser } | undefined
   > {
-    if (this.connection) {
+    // Re-resolve every time (cheap local `git remote get-url`) so a
+    // connection never outlives the repository it was built for.
+    const resolution = await resolveRepository();
+    const key = repositoryKey(resolution);
+    if (this.connection && this.connectionKey === key) {
       return this.connection;
     }
-    const resolution = await resolveRepository();
+    this.connection = undefined;
+    this.connectionKey = undefined;
     if (resolution.kind !== "resolved") {
       return undefined;
     }
@@ -737,8 +735,100 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
       resolution.providerKind,
       resolution.repository,
     );
+    this.connectionKey = key;
     return this.connection;
   }
+}
+
+/**
+ * Keeps the sidebar and the open panel in sync with the loaded git
+ * repository. Re-resolves the repository and, when it differs from what
+ * the open panel was built for, rebuilds the panel (re-running the
+ * normal resolve/pick flow) so issues and milestones always belong to
+ * the code currently open.
+ */
+async function syncWithRepository(
+  context: vscode.ExtensionContext,
+  treeDataProvider: MyIssuesTreeDataProvider,
+): Promise<void> {
+  treeDataProvider.refresh();
+  if (!activePanel || openPanelInFlight) {
+    return;
+  }
+  const key = repositoryKey(await resolveRepository());
+  if (!activePanel || key === activeRepositoryKey) {
+    return;
+  }
+  activePanel.dispose();
+  await openPanel(context);
+}
+
+/** Debounces bursts of change events (e.g. several `.git/config` writes) into one sync. */
+function registerRepositorySync(
+  context: vscode.ExtensionContext,
+  treeDataProvider: MyIssuesTreeDataProvider,
+): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const schedule = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      void syncWithRepository(context, treeDataProvider);
+    }, 300);
+  };
+
+  const watchers = new Map<string, vscode.Disposable>();
+  const watchGitConfigs = (): void => {
+    const current = new Set<string>();
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const folderPath = folder.uri.fsPath;
+      current.add(folderPath);
+      if (watchers.has(folderPath)) {
+        continue;
+      }
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(folder, ".git/config"),
+      );
+      watchers.set(
+        folderPath,
+        vscode.Disposable.from(
+          watcher,
+          watcher.onDidChange(schedule),
+          watcher.onDidCreate(schedule),
+          watcher.onDidDelete(schedule),
+        ),
+      );
+    }
+    for (const [folderPath, disposable] of watchers) {
+      if (!current.has(folderPath)) {
+        disposable.dispose();
+        watchers.delete(folderPath);
+      }
+    }
+  };
+  watchGitConfigs();
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      watchGitConfigs();
+      schedule();
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (
+        event.affectsConfiguration("remoteProjectManager.repository") ||
+        event.affectsConfiguration("remoteProjectManager.provider") ||
+        event.affectsConfiguration("remoteProjectManager.gitlabHost")
+      ) {
+        schedule();
+      }
+    }),
+    new vscode.Disposable(() => {
+      clearTimeout(timer);
+      for (const disposable of watchers.values()) {
+        disposable.dispose();
+      }
+      watchers.clear();
+    }),
+  );
 }
 
 /**
@@ -1376,6 +1466,7 @@ export interface RemoteProjectManagerApi {
 
 export function activate(context: vscode.ExtensionContext): RemoteProjectManagerApi {
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
+  registerRepositorySync(context, treeDataProvider);
   context.subscriptions.push(
     vscode.commands.registerCommand("remoteProjectManager.openPanel", () => {
       void openPanel(context);
