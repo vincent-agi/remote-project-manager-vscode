@@ -20,3 +20,4 @@ For _why_ the extension is built this way (not just how to use it), see [`docs/a
 - [0004 — Auto-Branch Creation: Git Execution Safety and Naming](../adr/0004-auto-branch-creation.md)
 - [0005 — Git Automation and AI Context Export Commands](../adr/0005-git-automation-and-ai-context.md)
 - [0006 — V3 Hardening: Concurrency, Path Safety, and Provider Capability Corrections](../adr/0006-v3-hardening.md)
+- [0007 — The Connected Repository Follows the Git Remote](../adr/0007-repository-follows-git-remote.md)

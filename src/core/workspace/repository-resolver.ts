@@ -108,3 +108,67 @@ export function resolveRepositoryCandidates(
   }
   return candidates;
 }
+
+/** Outcome of choosing which repository the extension should connect to. */
+export type RepositoryResolution =
+  | {
+      readonly kind: "resolved";
+      readonly providerKind: ProviderKind;
+      readonly repository: string;
+      readonly folderPath?: string;
+    }
+  | { readonly kind: "candidates"; readonly candidates: RepositoryCandidate[] }
+  | { readonly kind: "none" };
+
+/**
+ * Chooses the repository to connect to. The git `origin` remotes of the
+ * open workspace folders always win, so the issues/milestones shown can
+ * never drift from the source code that is loaded. The
+ * `remoteProjectManager.repository` / `provider` settings are only a
+ * fallback, used when no folder resolves to a recognized remote (e.g. a
+ * folder with no remote yet, or an unrecognized host).
+ */
+export function chooseRepository(
+  candidates: readonly RepositoryCandidate[],
+  settings: {
+    readonly provider: ProviderKind;
+    readonly repository: string;
+    readonly fallbackFolderPath?: string;
+  },
+): RepositoryResolution {
+  if (candidates.length === 1) {
+    const [only] = candidates;
+    return {
+      kind: "resolved",
+      providerKind: only.provider,
+      repository: only.repository,
+      folderPath: only.folderPath,
+    };
+  }
+  if (candidates.length > 1) {
+    return { kind: "candidates", candidates: [...candidates] };
+  }
+  if (settings.repository.includes("/")) {
+    return {
+      kind: "resolved",
+      providerKind: settings.provider,
+      repository: settings.repository,
+      folderPath: settings.fallbackFolderPath,
+    };
+  }
+  return { kind: "none" };
+}
+
+/** Stable identity of a resolution, to detect when the target repository changed. */
+export function repositoryKey(resolution: RepositoryResolution): string {
+  switch (resolution.kind) {
+    case "resolved":
+      return `${resolution.providerKind}:${resolution.repository}@${resolution.folderPath ?? ""}`;
+    case "candidates":
+      return `candidates:${resolution.candidates
+        .map((candidate) => `${candidate.provider}:${candidate.repository}@${candidate.folderPath}`)
+        .join("|")}`;
+    case "none":
+      return "none";
+  }
+}

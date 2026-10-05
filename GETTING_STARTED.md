@@ -44,7 +44,7 @@ The extension needs to know which GitHub or GitLab repository to manage. You hav
 }
 ```
 
-Use `"gitlab"` for `provider` if your project lives on GitLab. `repository` is always `"owner/repo"` (GitHub) or `"namespace/project"` (GitLab).
+This is only a fallback: when the workspace has a recognized git `origin` remote, that remote is used instead (and followed when you switch project). Use `"gitlab"` for `provider` if your project lives on GitLab. `repository` is always `"owner/repo"` (GitHub) or `"namespace/project"` (GitLab).
 
 > If your workspace has **multiple folders** that each point at a different repository, and you didn't set `remoteProjectManager.repository`, the extension will show you a picker the first time you open the panel — just click the one you want to work with.
 

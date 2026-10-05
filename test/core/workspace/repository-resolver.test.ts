@@ -1,8 +1,63 @@
 import { describe, expect, it } from "vitest";
 import {
+  chooseRepository,
   parseGitRemoteUrl,
+  repositoryKey,
   resolveRepositoryCandidates,
+  type RepositoryCandidate,
 } from "../../../src/core/workspace/repository-resolver";
+
+const candidate = (repository: string, folderPath = `/ws/${repository}`): RepositoryCandidate => ({
+  folderPath,
+  folderName: repository,
+  provider: "github",
+  repository,
+});
+
+describe("chooseRepository", () => {
+  const settings = {
+    provider: "gitlab",
+    repository: "stale/setting",
+    fallbackFolderPath: "/ws",
+  } as const;
+
+  it("prefers the detected remote over a stale repository setting", () => {
+    expect(chooseRepository([candidate("acme/widgets")], settings)).toEqual({
+      kind: "resolved",
+      providerKind: "github",
+      repository: "acme/widgets",
+      folderPath: "/ws/acme/widgets",
+    });
+  });
+
+  it("returns every candidate when several folders resolve", () => {
+    const result = chooseRepository([candidate("a/a"), candidate("b/b")], settings);
+    expect(result.kind).toBe("candidates");
+  });
+
+  it("falls back to the setting when nothing is detected", () => {
+    expect(chooseRepository([], settings)).toEqual({
+      kind: "resolved",
+      providerKind: "gitlab",
+      repository: "stale/setting",
+      folderPath: "/ws",
+    });
+  });
+
+  it("returns none when nothing is detected and the setting is empty", () => {
+    expect(chooseRepository([], { ...settings, repository: "" })).toEqual({ kind: "none" });
+  });
+});
+
+describe("repositoryKey", () => {
+  it("differs when the repository changes and matches when it does not", () => {
+    const a = chooseRepository([candidate("a/a")], { provider: "github", repository: "" });
+    const a2 = chooseRepository([candidate("a/a")], { provider: "github", repository: "" });
+    const b = chooseRepository([candidate("b/b")], { provider: "github", repository: "" });
+    expect(repositoryKey(a)).toBe(repositoryKey(a2));
+    expect(repositoryKey(a)).not.toBe(repositoryKey(b));
+  });
+});
 
 describe("parseGitRemoteUrl", () => {
   it("parses a GitHub SSH (scp-like) URL", () => {
