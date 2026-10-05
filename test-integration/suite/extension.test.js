@@ -77,6 +77,16 @@ describe("Remote Project Manager — integration", () => {
     sinon.restore();
   });
 
+  // Must run before anything calls `extension.activate()` explicitly:
+  // opening a folder restarts the extension host and nothing reveals the
+  // sidebar or runs a command, so activation has to come from
+  // `onStartupFinished` for the repository sync to run.
+  it("activates on startup without any command or view reveal", async () => {
+    const extension = vscode.extensions.getExtension(EXTENSION_ID);
+    assert.ok(extension, `extension ${EXTENSION_ID} not found`);
+    await waitFor(() => extension.isActive, 15000);
+  });
+
   it("activates and exposes RemoteProjectManagerApi", async () => {
     const extension = vscode.extensions.getExtension(EXTENSION_ID);
     assert.ok(extension, `extension ${EXTENSION_ID} not found`);
