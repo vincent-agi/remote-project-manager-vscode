@@ -1467,6 +1467,9 @@ export interface RemoteProjectManagerApi {
 export function activate(context: vscode.ExtensionContext): RemoteProjectManagerApi {
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
   registerRepositorySync(context, treeDataProvider);
+  // Opening a folder ("Open Folder", "Open Recent") restarts the extension
+  // host, so activation is the sync point for the newly loaded project.
+  void syncWithRepository(context, treeDataProvider);
   context.subscriptions.push(
     vscode.commands.registerCommand("remoteProjectManager.openPanel", () => {
       void openPanel(context);

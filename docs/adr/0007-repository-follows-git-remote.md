@@ -30,6 +30,12 @@ debounced, on:
 - changes to `repository`, `provider` or `gitlabHost`,
 - changes to a folder's `.git/config` (e.g. `git remote set-url`).
 
+Opening a folder ("Open Folder", "Open Recent") restarts the extension
+host, so the extension also syncs on activation. It declares the
+`onStartupFinished` activation event: previously it only activated when
+the sidebar was revealed, so a freshly opened project could stay
+unsynchronized until then.
+
 The sidebar tree re-resolves on every render and rebuilds its connection
 when the `repositoryKey` differs. An open panel whose key differs from
 the one it was built for is disposed and reopened through the normal

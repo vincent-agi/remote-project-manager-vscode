@@ -26,7 +26,7 @@ flowchart TD
 ```
 
 - **The git remote wins.** The detected `origin` remote always takes precedence, so the issues and milestones match the code you have open. `remoteProjectManager.repository` is only a fallback for folders with no recognized remote.
-- **Always in sync.** Switching project, adding/removing a workspace folder, changing a remote URL, or editing the repository/provider settings automatically refreshes the sidebar and reopens the panel on the new repository.
+- **Always in sync.** Opening a project (Open Folder, Open Recent), switching project, adding/removing a workspace folder, changing a remote URL, or editing the repository/provider settings automatically refreshes the sidebar and reopens the panel on the new repository.
 - **Single match is automatic.** In a single-root workspace (or a multi-root workspace where only one folder has a GitHub/GitLab remote), the panel connects immediately.
 - **Multiple matches show a picker.** When more than one workspace folder resolves to a recognized repository, the panel itself renders a list — pick one before any provider connection or token request happens. This means switching between repositories in a multi-root workspace costs nothing until you actually need to.
 - **Supported remotes:** `github.com` and `gitlab.com`, over SSH (`git@host:owner/repo.git`), `ssh://`, or `https://` URLs, with or without a trailing `.git`. A self-hosted GitLab instance is also recognized once `remoteProjectManager.gitlabHost` is set to its hostname (e.g. `gitlab.example.com`); otherwise set `remoteProjectManager.repository` manually for those.
