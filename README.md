@@ -1,68 +1,121 @@
 # Remote Project Manager
 
-Manage GitHub and GitLab **Issues** and **Milestones** from a single panel inside VS Code — and automatically create a git branch when you start working on an issue.
+> A VS Code extension that manages GitHub and GitLab Issues and Milestones from one panel, and creates the git branch for you when you start an issue — for developers who want to stay in the editor.
 
-> **New here?** Follow the [Getting Started guide](GETTING_STARTED.md) for a step-by-step walkthrough: install the extension, connect a repository, and use the panel — no prior knowledge needed.
+<!-- TODO Vincent : add a 10 s GIF or screenshot of the central panel. -->
+<!-- TODO Vincent : no Marketplace badge on purpose: package.json has `"publisher": "local-dev"` and the README documents installation from a `.vsix`, so nothing in the repo says it is published. -->
 
-## Overview
+[![CI](https://github.com/vincent-agi/remote-project-manager-vscode/actions/workflows/ci.yml/badge.svg)](https://github.com/vincent-agi/remote-project-manager-vscode/actions/workflows/ci.yml)
 
-Remote Project Manager opens a central panel in the editor area where you can view, filter, edit, and update Issues and Milestones for a GitHub or GitLab repository. Changes made in the panel are written back to the remote platform in real time, respecting your account's actual permissions.
+**Status:** <!-- TODO Vincent : confirm status (active | stable | archived). Version 0.0.1, last commits Oct 2026. --> — **License:** MIT
 
-It also automates a common manual step: when an issue assigned to you moves to "in progress", the extension can create and check out a correctly named git branch for you, based on an up-to-date default branch.
+> **New here?** Follow the [Getting Started guide](GETTING_STARTED.md): install the extension, connect a repository, use the panel.
+
+---
+
+## 1. Why this project exists
+
+- **Problem:** triaging issues and milestones means leaving the editor for the GitHub or GitLab web UI, and then creating, by hand, a correctly named branch from an up-to-date default branch.
+- **Who it's for:** developers working on GitHub or GitLab repositories (including self-hosted GitLab through `remoteProjectManager.gitlabHost`).
+- **Intent:** view, filter and edit Issues and Milestones in a central panel with changes written back to the remote in real time, respecting your account's actual permissions, and automate the branch step.
+
+### Key features
+
+- **Multi-provider support:** GitHub and GitLab behind a shared interface; switch provider per repository via settings.
+- **Central panel UI:** Issues and Milestones side by side, with read-only fields automatically disabled when your account lacks write access.
+- **Secure credential storage:** GitHub uses VS Code's built-in authentication provider (no token ever touches disk in our code); GitLab uses a Personal Access Token stored in VS Code's encrypted `SecretStorage`. See [Authentication and Security](docs/functionals/01-authentication-and-security.md).
+- **Multi-root workspace detection:** the repository is detected from your workspace's git remotes, with a picker when more than one is found.
+- **Local caching:** reads are cached for a short, configurable time to avoid API rate limits, with a manual Refresh button to bypass it.
+- **Automated Git workflow:** auto-creates a sanitized, conventionally named branch when an issue assigned to you moves to "in progress", with safe handling of uncommitted changes; manual creation with your own base branch is also possible. See [Automated Branch Workflow](docs/functionals/03-automated-branch-workflow.md).
+- **Filter issues by milestone:** jump from a milestone's detail pane straight to its issues.
+- **Git and AI commands:** Conventional Commits + Gitmoji composer, PR creation from an issue, commit-history lint, and context export for AI coding agents (see [reference](#git--ai-automation-commands)).
+
+## 2. Architecture & technical choices
+
+Three layers following Clean Architecture ([ADR-0001](docs/adr/0001-architecture.md)): `src/core/` has no VS Code or HTTP import, `src/providers/` implements the provider contract, and `src/webview/` + `src/extension.ts` form the presentation layer and the composition root.
 
 ```mermaid
 flowchart LR
-    subgraph VSCode["VS Code Extension Host"]
-        Panel["Central Panel<br/>(Webview)"]
-        Controller["PanelController"]
-        Cache["CachingProjectProvider<br/>(TTL cache)"]
-        Branch["BranchManager"]
-        Git["Local Git<br/>(simple-git)"]
-    end
-    Panel <--> Controller
-    Controller --> Cache
-    Controller --> Branch
-    Branch --> Git
-    Cache <--> GitHub[("GitHub API")]
-    Cache <--> GitLab[("GitLab API")]
+  subgraph PRES["Presentation: src/extension.ts, src/webview/"]
+    EXT[extension.ts<br/>composition root]
+    PC[PanelController]
+    WV[webview-ui/main.ts<br/>plain script, no bundler]
+  end
+  subgraph CORE["Domain: src/core/ (no VS Code import)"]
+    IPP{IProjectProvider}
+    AUTO[automation<br/>issue-transition, branch-name]
+    GITL[git<br/>BranchManager, commit-message, lint-commits, pr-body]
+    AI[ai<br/>issue / milestone context]
+    WS[workspace<br/>repository-resolver]
+  end
+  subgraph INFRA["Infrastructure: src/providers/"]
+    CACHE[CachingProjectProvider<br/>TTL cache decorator]
+    GH[github.provider<br/>Octokit]
+    GL[gitlab.provider<br/>Gitbeaker]
+    SG[simple-git.service]
+  end
+  EXT --> PC
+  PC <-- postMessage --> WV
+  PC --> IPP
+  PC --> AUTO
+  PC --> GITL
+  EXT --> AI
+  EXT --> WS
+  CACHE -. implements .-> IPP
+  GH -. implements .-> IPP
+  GL -. implements .-> IPP
+  CACHE --> GH
+  CACHE --> GL
+  GITL --> SG
 ```
 
-## Key Features
+| Decision                                                                                                                                                 | Why                                                                                                                                         | Alternative considered                                                             |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Layered Clean Architecture, UI depends on `IProjectProvider` only ([ADR-0001](docs/adr/0001-architecture.md))                                            | A third provider means one new `src/providers/<name>/` module and one line at the composition root                                          | Provider-specific code in the UI layer, which the ADR sets out to avoid            |
+| Webview panel as an editor-area tab ([ADR-0001](docs/adr/0001-architecture.md))                                                                          | Full control for a list-plus-detail view with inline editing; provider calls stay in the extension host so the webview holds no credentials | TreeView (poor for inline editing), Custom Editor (made for file-backed documents) |
+| "In progress" is a label, not an issue state ([ADR-0002](docs/adr/0002-automation-hooks.md))                                                             | Neither GitHub nor GitLab has a native "in progress" state; teams commonly use an `in-progress` label                                       | A native state: does not exist on either platform                                  |
+| GitHub via VS Code's native auth session, GitLab via PAT in `SecretStorage` ([ADR-0003](docs/adr/0003-v1-hardening.md))                                  | Our code never sees or stores a raw GitHub token                                                                                            | PAT prompt for GitHub (the earlier behavior)                                       |
+| Caching decorator as the rate-limit mechanism ([ADR-0003](docs/adr/0003-v1-hardening.md))                                                                | `CachingProjectProvider` wraps any `IProjectProvider`; TTL configurable                                                                     | A separate token-bucket limiter                                                    |
+| Webview ships as a plain script, no bundler; message types mirrored by hand ([ADR-0003](docs/adr/0003-v1-hardening.md), [CONTRIBUTING](CONTRIBUTING.md)) | Avoids introducing a bundler for a small UI; re-render guard is a structural diff (`state-diff.ts`)                                         | A bundler with real `import`s; a subscription model for state                      |
+| `BranchManager` owns the safety sequence, git behind `IGitService` / `simple-git` ([ADR-0004](docs/adr/0004-auto-branch-creation.md))                    | Never touch the working tree destructively; testable with a fake git service                                                                | <!-- TODO Vincent : alternative not stated in the ADR -->                          |
+| Detected git remote wins over the `repository` setting ([ADR-0007](docs/adr/0007-repository-follows-git-remote.md))                                      | A user-level setting kept pointing at the previous project after switching workspace                                                        | Explicit setting always wins (ADR-0003, now superseded)                            |
 
-- **Multi-provider support** — Works with GitHub and GitLab through a shared interface; switch providers per repository via settings.
-- **Central panel UI** — List and edit Issues and Milestones side by side, with read-only fields automatically disabled when your account lacks write access.
-- **Secure credential storage** — GitHub uses VS Code's built-in authentication provider (no token ever touches disk in our code); GitLab uses a Personal Access Token stored in VS Code's encrypted `SecretStorage`. See [Authentication and Security](docs/functionals/01-authentication-and-security.md).
-- **Multi-root workspace detection** — Automatically detects the repository from your workspace's git remotes, and offers a picker when more than one is found.
-- **Local caching** — Issue/milestone/capability reads are cached for a short, configurable time to avoid hitting API rate limits, with a manual "Refresh" button to bypass the cache.
-- **Automated Git workflow** — Auto-creates a sanitized, conventionally named branch when an issue assigned to you starts "in progress," with safe handling of uncommitted changes. You can also trigger branch creation manually from an issue's detail pane, choosing the base branch yourself. See [Automated Branch Workflow](docs/functionals/03-automated-branch-workflow.md).
-- **Filter issues by milestone** — Jump from a milestone's detail pane straight to its issues, pre-filtered.
+**Stack:** TypeScript, VS Code Extension API (`^1.85.0`), Octokit (`@octokit/rest`), Gitbeaker (`@gitbeaker/rest`), `simple-git`, Vitest, ESLint, Prettier.
 
-## Quick Start / Installation
+**Repository layout:**
 
-### Prerequisites
+```
+src/
+  core/            # domain: models, provider interface, auth, automation, git, ai, cache, workspace
+  providers/       # github/, gitlab/, git/ (simple-git), caching-project-provider.ts
+  webview/         # panel controller, messages, HTML generation
+  webview-ui/      # script running inside the webview (no bundler)
+  extension.ts     # activation and composition root
+test/              # Vitest specs mirroring src/
+test-integration/  # real VS Code end-to-end suite
+docs/adr/          # 7 architecture decision records
+docs/functionals/  # functional guides (see INDEX.md)
+```
 
-- VS Code 1.85 or later.
-- [Node.js](https://nodejs.org/) 18 or later and `git` installed and on your `PATH` (required for the auto-branch feature).
-- A GitHub or GitLab account with access to the repository you want to manage.
+**Quality:** 287 Vitest unit tests across 34 files, an end-to-end suite in a real VS Code (`npm run test:integration`), ESLint with type-checked rules, Prettier check. The [CI workflow](.github/workflows/ci.yml) runs compile, lint, format check, tests with a JUnit report, and `vsce package`, uploading the `.vsix` as an artifact.
 
-### Run from source (development)
+Deep dives: [`docs/functionals/`](docs/functionals/INDEX.md), [`docs/adr/`](docs/adr/), [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 3. Quickstart
+
+**Prerequisites:** VS Code 1.85+, Node.js 18+ (CI uses 20), `git` on your `PATH` (needed for auto-branch), and a GitHub or GitLab account with access to the repository you want to manage.
 
 ```bash
+git clone https://github.com/vincent-agi/remote-project-manager-vscode.git
+cd remote-project-manager-vscode
 npm install
 npm run compile
+npm test
 ```
 
 Then press `F5` in VS Code to launch an Extension Development Host with the extension loaded.
 
-### Install from a packaged build (`.vsix`)
-
-VS Code's **Install from VSIX...** command (Extensions view → `...` menu → **Install from VSIX...**, or the `Extensions: Install from VSIX...` command in the Command Palette) always works — but you need a `.vsix` file first. Build one with:
-
-```bash
-npm run package
-```
-
-This compiles the extension and runs `vsce package`, producing `remote-project-manager-<version>.vsix` in the project root. Install that file via the command above.
+To install a packaged build: `npm run package` produces `remote-project-manager-<version>.vsix`; install it with **Extensions: Install from VSIX...**.
 
 ### Connect a repository
 
@@ -72,9 +125,9 @@ This compiles the extension and runs `vsce package`, producing `remote-project-m
 
 See [Issues and Milestones Management](docs/functionals/02-issues-and-milestones-management.md) for panel usage details.
 
-## Git & AI Automation Commands
+### Git & AI Automation Commands
 
-Beyond the panel, the extension contributes commands (Command Palette) for a standardized, AI-friendly git workflow — Conventional Commits combined with Gitmoji, and structured context export for AI coding agents (Copilot Chat, Claude Code, Continue.dev, ...):
+Beyond the panel, the extension contributes Command Palette entries for a standardized, AI-friendly git workflow: Conventional Commits combined with Gitmoji, and structured context export for AI coding agents (Copilot Chat, Claude Code, Continue.dev, ...).
 
 | Command                                                             | What it does                                                                                                                                                                                                                                |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -88,7 +141,7 @@ Beyond the panel, the extension contributes commands (Command Palette) for a sta
 
 The "active issue" for these commands is resolved from your current branch name (matching `${issue_id}` in `remoteProjectManager.branchNamePattern`), falling back to a picker when it can't be determined.
 
-## Extension Settings
+### Extension Settings
 
 | Setting                                       | Type                   | Default                             | Description                                                                                                                                                                        |
 | --------------------------------------------- | ---------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -100,15 +153,31 @@ The "active issue" for these commands is resolved from your current branch name 
 | `remoteProjectManager.branchNamePattern`      | `string`               | `"${type}/${issue_id}-${slug}"`     | Pattern for auto-created branch names. Placeholders: `${type}` (inferred from labels), `${issue_id}` (issue number), `${slug}` (sanitized title).                                  |
 | `remoteProjectManager.aiContextFile`          | `string`               | `".github/copilot-instructions.md"` | Workspace-relative path **Export Milestone Context for AI Agents** writes to. Only the extension-managed section is replaced on re-export; the rest of the file is left untouched. |
 
+## 4. Lessons learned
+
+<!-- TODO Vincent : these are leads inferred from the code, ADRs and git history. Rewrite in your own voice or delete. -->
+
+- **What this project validated:** <!-- TODO Vincent : lead — the `IProjectProvider` abstraction held across two very different APIs (GitHub, GitLab), with a caching decorator added on top without touching the UI (ADR-0001, ADR-0003). -->
+- **What was harder than expected:** <!-- TODO Vincent : lead — GitLab SDK usage: several fixes for wrong call shapes (title as a positional argument in 43e811a / a6426d0, `ProjectLabels` property in 4206a0d, assignee_ids and labels in 439ca3d), and permission-model corrections in ADR-0006 (Triage role, group-inherited members, project vs group access level). -->
+- **What I'd do differently today:** <!-- TODO Vincent : lead — a real end-to-end VS Code suite arrived late (404a7ec) after two "hardening" passes (ADR-0003, ADR-0006); ADR-0007 reversed ADR-0003's "explicit setting always wins"; the webview's hand-mirrored message types are a known cost of having no bundler. -->
+- **Next steps / roadmap:** <!-- TODO Vincent : your call — publish to the Marketplace (package.json still has publisher "local-dev"), update the `repository.url` in package.json to the renamed repo. -->
+
+---
+
 ## Documentation
 
-New to the extension? Start with [Getting Started](GETTING_STARTED.md). Deep-dive functional guides live in [`docs/functionals/`](docs/functionals/INDEX.md):
+New to the extension? Start with [Getting Started](GETTING_STARTED.md). Functional guides in [`docs/functionals/`](docs/functionals/INDEX.md):
 
 - [01 — Authentication and Security](docs/functionals/01-authentication-and-security.md)
 - [02 — Issues and Milestones Management](docs/functionals/02-issues-and-milestones-management.md)
 - [03 — Automated Branch Workflow](docs/functionals/03-automated-branch-workflow.md)
 - [04 — Troubleshooting and FAQ](docs/functionals/04-troubleshooting-and-faq.md)
+- [05 — Git Automation and AI Context](docs/functionals/05-git-automation-and-ai-context.md)
 
-Architectural Decision Records live in [`docs/adr/`](docs/adr/).
+## Contributing
 
-Want to contribute code? See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow.
+Issues and PRs welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+
+## About
+
+Built by [Vincent AGI](https://vincent-agi.fr) — software engineer & mentor.
