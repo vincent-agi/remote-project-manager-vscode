@@ -5,3 +5,4 @@ dist/
 test-results/
 test-integration/out/
 test-integration/fixtures/workspace/
+.DS_Store
