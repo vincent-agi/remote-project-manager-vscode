@@ -44,6 +44,8 @@ import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { StateSync } from "./state-sync";
+import { openGitGraph } from "./git-graph-panel";
+import { parseIssueTemplate, type IssueTemplate } from "./core/templates/issue-template";
 import {
   describeAssignedBadge,
   isPollDue,
@@ -60,7 +62,6 @@ import {
   type IssueReferenceKind,
 } from "./core/git/commit-message";
 import { parseGitmojis, type Gitmoji } from "./core/git/gitmoji";
-import { groupCommitsByIssue } from "./core/git/graph";
 import { lintCommits } from "./core/git/lint-commits";
 import { buildConventionalPrTitle, buildPrBody, type CommitRef } from "./core/git/pr-body";
 import { formatIssueContext } from "./core/ai/issue-context";
@@ -378,6 +379,47 @@ async function connectRepository(
   return resolveAndConnect(providerKind, repository, credentialStore, cacheTtlSeconds, gitlabHost);
 }
 
+/** Workspace-relative places issue templates live, directories first. */
+const TEMPLATE_DIRECTORIES = [".github/ISSUE_TEMPLATE", ".gitlab/issue_templates"] as const;
+const TEMPLATE_FILES = [".github/ISSUE_TEMPLATE.md", ".github/issue_template.md"] as const;
+
+/** Reads Markdown issue templates from the repository's conventional locations. */
+async function readIssueTemplates(folderPath: string | undefined): Promise<IssueTemplate[]> {
+  if (!folderPath) {
+    return [];
+  }
+  const root = vscode.Uri.file(folderPath);
+  const templates: IssueTemplate[] = [];
+  const read = async (uri: vscode.Uri, fileName: string): Promise<void> => {
+    try {
+      const content = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+      const template = parseIssueTemplate(fileName, content);
+      if (template) {
+        templates.push(template);
+      }
+    } catch {
+      // Unreadable template: skip it rather than failing the whole list.
+    }
+  };
+  for (const directory of TEMPLATE_DIRECTORIES) {
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(vscode.Uri.joinPath(root, directory));
+    } catch {
+      continue;
+    }
+    for (const [name, type] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+      if (type === vscode.FileType.File) {
+        await read(vscode.Uri.joinPath(root, directory, name), name);
+      }
+    }
+  }
+  for (const file of TEMPLATE_FILES) {
+    await read(vscode.Uri.joinPath(root, file), file.split("/").pop() ?? file);
+  }
+  return templates;
+}
+
 /** Builds a fully wired PanelController for a resolved provider/repository. */
 async function buildController(
   context: vscode.ExtensionContext,
@@ -481,6 +523,7 @@ async function buildController(
         void openPanel(context);
       });
     },
+    () => readIssueTemplates(folderPath),
   );
 }
 
@@ -1482,68 +1525,13 @@ async function createPrFromIssue(
 }
 
 /** Shows the semantic Git Graph (#59): commits grouped by referenced issue, browsable via QuickPick. */
-async function showGitGraph(): Promise<void> {
+function showGitGraph(context: vscode.ExtensionContext): void {
   const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
     void vscode.window.showErrorMessage("No workspace folder open.");
     return;
   }
-  const gitService = new SimpleGitService();
-  let log;
-  try {
-    log = await gitService.log(cwd, "-200");
-  } catch (error) {
-    void vscode.window.showErrorMessage(
-      `Could not read git log: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return;
-  }
-  const commits: CommitRef[] = log.map((entry) => ({ hash: entry.hash, message: entry.message }));
-  const groups = groupCommitsByIssue(commits);
-  if (groups.length === 0) {
-    void vscode.window.showInformationMessage("No commits found.");
-    return;
-  }
-
-  let issueTitles = new Map<number, string>();
-  if (activeProvider) {
-    try {
-      const issues = await activeProvider.listIssues();
-      issueTitles = new Map(issues.map((issue) => [issue.number, issue.title]));
-    } catch {
-      // Best-effort decoration only — fall back to plain "#N" labels.
-    }
-  }
-
-  const groupPick = await vscode.window.showQuickPick(
-    groups.map((group) => ({
-      label:
-        group.issueNumber === null
-          ? "Unlinked"
-          : `#${group.issueNumber}${issueTitles.has(group.issueNumber) ? " " + issueTitles.get(group.issueNumber) : ""}`,
-      description: `${group.commits.length} commit${group.commits.length === 1 ? "" : "s"}`,
-      group,
-    })),
-    { title: "Git Graph — grouped by issue", placeHolder: "Pick an issue to see its commits" },
-  );
-  if (!groupPick) {
-    return;
-  }
-
-  const commitPick = await vscode.window.showQuickPick(
-    groupPick.group.commits.map((commit) => ({
-      label: commit.hash.slice(0, 7),
-      description: commit.message.split("\n")[0],
-      commit,
-    })),
-    { title: groupPick.label, placeHolder: "Pick a commit to copy its hash" },
-  );
-  if (!commitPick) {
-    return;
-  }
-
-  await vscode.env.clipboard.writeText(commitPick.commit.hash);
-  void vscode.window.showInformationMessage(`Copied commit ${commitPick.label} to clipboard.`);
+  openGitGraph(context, cwd, () => activeProvider);
 }
 
 /** Lints recent commit history against the Gitmoji/Conventional Commit convention (#60), never rewriting history. */
@@ -1987,7 +1975,7 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
       },
     ),
     vscode.commands.registerCommand("remoteProjectManager.showGitGraph", () => {
-      void showGitGraph();
+      showGitGraph(context);
     }),
     vscode.commands.registerCommand("remoteProjectManager.lintCommitHistory", () => {
       void lintCommitHistory();

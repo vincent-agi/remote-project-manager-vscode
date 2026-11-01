@@ -51,6 +51,8 @@ function makeProvider(capabilities: ProviderCapabilities): IProjectProvider {
     updateMilestone: vi.fn().mockResolvedValue({ ...milestone, state: "closed" }),
     listLabels: vi.fn().mockResolvedValue(["bug"]),
     listAssignableUsers: vi.fn().mockResolvedValue(["octocat"]),
+    listComments: vi.fn().mockResolvedValue([]),
+    addComment: vi.fn(),
   };
 }
 
@@ -594,5 +596,98 @@ describe("PanelController connection feedback", () => {
     await controller.handleMessage({ type: "reconnect" });
 
     expect(onReconnect).toHaveBeenCalledOnce();
+  });
+});
+
+describe("PanelController issue templates", () => {
+  it("answers requestIssueTemplates with the loaded templates", async () => {
+    const posted: { type: string; templates?: unknown }[] = [];
+    const templates = [{ name: "Bug", body: "b", labels: ["bug"] }];
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Promise.resolve(templates),
+    );
+
+    await controller.handleMessage({ type: "requestIssueTemplates" });
+
+    expect(posted).toEqual([{ type: "issueTemplates", templates }]);
+  });
+
+  it("falls back to an empty list when loading fails, and ignores the request without a loader", async () => {
+    const posted: { type: string; templates?: unknown }[] = [];
+    const failing = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Promise.reject(new Error("fs")),
+    );
+    await failing.handleMessage({ type: "requestIssueTemplates" });
+    expect(posted).toEqual([{ type: "issueTemplates", templates: [] }]);
+
+    const none = new PanelController(makeProvider(fullAccess), (message) => posted.push(message));
+    await none.handleMessage({ type: "requestIssueTemplates" });
+    expect(posted).toHaveLength(1);
+  });
+});
+
+describe("PanelController comments", () => {
+  const comment = { id: "1", author: "octocat", body: "hi", createdAt: "2026-01-01T00:00:00Z" };
+
+  it("answers requestComments with the provider's comments", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listComments as ReturnType<typeof vi.fn>).mockResolvedValue([comment]);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestComments", issueId: issue.id });
+
+    expect(provider.listComments).toHaveBeenCalledWith(issue.id);
+    expect(posted).toEqual([{ type: "comments", issueId: issue.id, comments: [comment] }]);
+  });
+
+  it("adds a trimmed comment, then re-sends the comments and the state", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listComments as ReturnType<typeof vi.fn>).mockResolvedValue([comment]);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "addComment", issueId: issue.id, body: "  hello \n" });
+
+    expect(provider.addComment).toHaveBeenCalledWith(issue.id, "hello");
+    expect(posted.map((message) => message.type)).toEqual(["actionSuccess", "comments", "state"]);
+  });
+
+  it("refuses an empty comment without calling the provider", async () => {
+    const provider = makeProvider(fullAccess);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "addComment", issueId: issue.id, body: "   " });
+
+    expect(provider.addComment).not.toHaveBeenCalled();
+    expect(posted).toEqual([{ type: "error", message: "A comment cannot be empty." }]);
+  });
+
+  it("refuses to comment without write access", async () => {
+    const provider = makeProvider(readOnly);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "addComment", issueId: issue.id, body: "hi" });
+
+    expect(provider.addComment).not.toHaveBeenCalled();
+    expect(posted.at(-1)).toMatchObject({ type: "error" });
   });
 });

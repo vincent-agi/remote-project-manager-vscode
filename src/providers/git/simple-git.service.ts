@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import simpleGit from "simple-git";
 import type {
+  GitGraphCommit,
   GitLogEntry,
   GitStatusSummary,
   IGitService,
@@ -110,6 +111,38 @@ export class SimpleGitService implements IGitService {
   async getCurrentBranch(cwd: string): Promise<string> {
     const branch = await simpleGit(cwd).raw(["rev-parse", "--abbrev-ref", "HEAD"]);
     return branch.trim();
+  }
+
+  async getGraphLog(cwd: string, maxCount: number): Promise<GitGraphCommit[]> {
+    const raw = await simpleGit(cwd).raw([
+      "log",
+      "--all",
+      "--topo-order",
+      `--max-count=${maxCount}`,
+      `--pretty=format:%H${LOG_FIELD_SEP}%P${LOG_FIELD_SEP}%an${LOG_FIELD_SEP}%aI${LOG_FIELD_SEP}%D${LOG_FIELD_SEP}%B${LOG_RECORD_SEP}`,
+    ]);
+    return raw
+      .split(LOG_RECORD_SEP)
+      .map((record) => record.replace(/^\n/, ""))
+      .filter((record) => record.trim().length > 0)
+      .map((record) => {
+        const [hash, parents, author, date, refs, ...messageParts] = record.split(LOG_FIELD_SEP);
+        return {
+          hash,
+          parents: parents.split(" ").filter(Boolean),
+          author,
+          date,
+          refs: refs
+            .split(",")
+            .map((ref) => ref.trim().replace(/^HEAD -> /, ""))
+            .filter((ref) => ref !== "" && ref !== "HEAD"),
+          message: messageParts.join(LOG_FIELD_SEP).replace(/\n+$/, ""),
+        };
+      });
+  }
+
+  async getCommitPatch(cwd: string, hash: string): Promise<string> {
+    return simpleGit(cwd).raw(["show", "--stat", "--patch", hash]);
   }
 
   async getHeadSha(cwd: string): Promise<string> {

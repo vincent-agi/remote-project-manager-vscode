@@ -1,3 +1,4 @@
+import type { IComment } from "../../core/models/comment.model";
 import type { IIssue } from "../../core/models/issue.model";
 import type { IMilestone } from "../../core/models/milestone.model";
 import type {
@@ -12,8 +13,10 @@ import type {
 } from "../../core/providers/project-provider.interface";
 import {
   mapDomainIssueStateToGithub,
+  mapGithubCommentToDomain,
   mapGithubIssueToDomain,
   mapGithubMilestoneToDomain,
+  type RawGithubComment,
   type RawGithubIssue,
   type RawGithubMilestone,
 } from "./github.mappers";
@@ -51,6 +54,19 @@ export interface GithubClient {
       data: RawGithubIssue;
     }>;
     create(params: Record<string, unknown>): Promise<{ data: RawGithubIssue }>;
+    listComments(params: {
+      owner: string;
+      repo: string;
+      issue_number: number;
+      per_page: number;
+      page: number;
+    }): Promise<{ data: readonly RawGithubComment[] }>;
+    createComment(params: {
+      owner: string;
+      repo: string;
+      issue_number: number;
+      body: string;
+    }): Promise<{ data: RawGithubComment }>;
     update(params: Record<string, unknown>): Promise<{ data: RawGithubIssue }>;
     listMilestones(params: {
       owner: string;
@@ -220,6 +236,30 @@ export class GithubProvider implements IProjectProvider {
       milestone: milestoneNumber,
     });
     return mapGithubIssueToDomain(data, this.repoFullName);
+  }
+
+  async listComments(issueId: string): Promise<readonly IComment[]> {
+    const issueNumber = this.parseIssueNumber(issueId);
+    const comments = await this.paginateAll((page) =>
+      this.client.issues.listComments({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        per_page: 100,
+        page,
+      }),
+    );
+    return comments.map(mapGithubCommentToDomain);
+  }
+
+  async addComment(issueId: string, body: string): Promise<IComment> {
+    const { data } = await this.client.issues.createComment({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: this.parseIssueNumber(issueId),
+      body,
+    });
+    return mapGithubCommentToDomain(data);
   }
 
   async updateIssue(id: string, patch: UpdateIssueInput): Promise<IIssue> {

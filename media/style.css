@@ -458,3 +458,259 @@ kbd {
     animation: none;
   }
 }
+
+.board-view {
+  display: block;
+  padding: 8px;
+  overflow: auto;
+}
+
+.board-note {
+  margin: 0 0 8px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.board-column {
+  padding: 6px;
+  min-height: 120px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+}
+
+.board-column.drop-target {
+  outline: 2px dashed var(--vscode-focusBorder);
+}
+
+.board-column h3 {
+  margin: 0 0 6px;
+  font-size: 1em;
+}
+
+.board-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 6px;
+  background-color: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  border-radius: 4px;
+}
+
+.board-card[draggable="true"] {
+  cursor: grab;
+}
+
+.board-card-title {
+  padding: 0;
+  text-align: left;
+  color: var(--vscode-textLink-foreground);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.board-card-move {
+  align-self: flex-start;
+  color: var(--vscode-input-foreground);
+  background-color: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+}
+
+.md-editor {
+  position: relative;
+}
+
+.md-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.md-tab[aria-selected="true"] {
+  font-weight: 600;
+  border-bottom: 2px solid var(--vscode-focusBorder);
+}
+
+.md-preview {
+  min-height: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+
+.md-preview pre {
+  padding: 6px;
+  overflow: auto;
+  background-color: var(--vscode-textCodeBlock-background);
+}
+
+.md-preview code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  background-color: var(--vscode-textCodeBlock-background);
+}
+
+.md-preview blockquote {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--vscode-textBlockQuote-border);
+}
+
+.md-preview li.task {
+  list-style: none;
+}
+
+.md-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 180px;
+  overflow: auto;
+  color: var(--vscode-editorSuggestWidget-foreground, var(--vscode-foreground));
+  background-color: var(--vscode-editorSuggestWidget-background);
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border));
+}
+
+.md-suggestions li {
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.md-suggestions li.active {
+  color: var(--vscode-editorSuggestWidget-selectedForeground, inherit);
+  background-color: var(--vscode-editorSuggestWidget-selectedBackground);
+}
+
+.badge.new-comments {
+  color: var(--vscode-badge-foreground);
+  background-color: var(--vscode-badge-background);
+}
+
+.comment {
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+}
+
+.comment header {
+  margin-bottom: 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.comment .md-preview {
+  min-height: 0;
+  padding: 0;
+  border: none;
+}
+
+.graph-page {
+  padding: 0 8px 8px;
+}
+
+.graph-page .board-note {
+  margin: 8px 0;
+}
+
+.graph-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.graph-row:hover,
+.graph-row:focus-visible {
+  background-color: var(--vscode-list-hoverBackground);
+  outline: none;
+}
+
+.graph-svg {
+  flex: 0 0 auto;
+}
+
+.graph-svg line {
+  stroke-width: 2;
+  fill: none;
+}
+
+.graph-svg .node {
+  stroke: var(--vscode-editor-background);
+  stroke-width: 1;
+}
+
+.graph-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.graph-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-meta {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85em;
+}
+
+.badge.ref {
+  color: var(--vscode-badge-foreground);
+  background-color: var(--vscode-badge-background);
+}
+
+.badge.ref.head {
+  font-weight: 700;
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.lane-0 {
+  stroke: var(--vscode-charts-blue);
+  fill: var(--vscode-charts-blue);
+}
+.lane-1 {
+  stroke: var(--vscode-charts-green);
+  fill: var(--vscode-charts-green);
+}
+.lane-2 {
+  stroke: var(--vscode-charts-orange);
+  fill: var(--vscode-charts-orange);
+}
+.lane-3 {
+  stroke: var(--vscode-charts-purple);
+  fill: var(--vscode-charts-purple);
+}
+.lane-4 {
+  stroke: var(--vscode-charts-red);
+  fill: var(--vscode-charts-red);
+}
+.lane-5 {
+  stroke: var(--vscode-charts-yellow);
+  fill: var(--vscode-charts-yellow);
+}
+.lane-6 {
+  stroke: var(--vscode-terminal-ansiCyan);
+  fill: var(--vscode-terminal-ansiCyan);
+}
+.lane-7 {
+  stroke: var(--vscode-terminal-ansiMagenta);
+  fill: var(--vscode-terminal-ansiMagenta);
+}

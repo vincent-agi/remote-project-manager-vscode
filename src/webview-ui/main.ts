@@ -5,7 +5,11 @@
 // because the host and webview programs have separate `rootDir`s.
 
 import { hasStateChanged } from "./state-diff.js";
+import { BOARD_COLUMNS, buildBoard, planBoardMove, type BoardColumnId } from "./board-model.js";
 import { describeCacheAge } from "./cache-age.js";
+import { markSeen, readSeenComments, unseenComments, type SeenComments } from "./comment-state.js";
+import { renderMarkdown } from "./markdown.js";
+import { enhanceMarkdownEditor } from "./markdown-editor.js";
 import { moveSelection, shortcutFor, SHORTCUT_HELP } from "./keyboard-shortcuts.js";
 import {
   computeMilestoneProgress,
@@ -31,6 +35,21 @@ import {
   type IssueSort,
   type SavedFilter,
 } from "./issue-view-model.js";
+
+interface CommentView {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  url?: string;
+}
+
+interface IssueTemplateView {
+  name: string;
+  body: string;
+  title?: string;
+  labels: readonly string[];
+}
 
 interface RepositoryOptionView {
   id: string;
@@ -99,6 +118,8 @@ type OutboundMessage =
       dataFetchedAt?: number;
     }
   | { type: "uiPrefs"; prefs: Record<string, unknown> }
+  | { type: "issueTemplates"; templates: IssueTemplateView[] }
+  | { type: "comments"; issueId: string; comments: CommentView[] }
   | { type: "repositoryOptions"; options: RepositoryOptionView[] }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
@@ -111,7 +132,7 @@ type InboundMessage =
   | { type: "selectRepository"; id: string }
   | {
       type: "createIssue";
-      input: { title: string; body: string; milestoneId?: string | null };
+      input: { title: string; body: string; milestoneId?: string | null; labels?: string[] };
     }
   | {
       type: "updateIssue";
@@ -131,7 +152,10 @@ type InboundMessage =
     }
   | { type: "createBranchForIssue"; id: string }
   | { type: "saveUiPrefs"; prefs: Record<string, unknown> }
-  | { type: "reconnect" };
+  | { type: "reconnect" }
+  | { type: "requestIssueTemplates" }
+  | { type: "requestComments"; issueId: string }
+  | { type: "addComment"; issueId: string; body: string };
 
 declare function acquireVsCodeApi(): {
   postMessage(message: InboundMessage): void;
@@ -156,6 +180,14 @@ let issueFilter: IssueFilter = EMPTY_FILTER;
 let uiPrefs: Record<string, unknown> = {};
 let savedFilters: SavedFilter[] = [];
 let visibleIssueIds: string[] = [];
+let issueTemplates: IssueTemplateView[] = [];
+let seenComments: SeenComments = {};
+const commentsByIssue = new Map<string, CommentView[]>();
+/** Comment count each cached comment list was fetched at, to spot new ones after a refresh. */
+const commentsFetchedAtCount = new Map<string, number>();
+const commentRequestsInFlight = new Set<string>();
+let commentSubmitIssueId: string | null = null;
+let templatesRequested = false;
 let issueSort: IssueSort = "default";
 let issueGroup: IssueGroup = "none";
 let milestoneStateFilter: "all" | "open" | "closed" = "all";
@@ -196,6 +228,11 @@ function showError(message: string, authError = false): void {
     errorTimer = window.setTimeout(clearError, 5000);
   }
   banner.hidden = false;
+  commentSubmitIssueId = null;
+  const commentButton = document.getElementById("comment-add") as HTMLButtonElement | null;
+  if (commentButton) {
+    commentButton.disabled = false;
+  }
   setRefreshing(false);
   // A failure before the first state would otherwise leave skeletons pulsing forever.
   document.querySelectorAll(".skeleton-row").forEach((row) => row.remove());
@@ -326,7 +363,15 @@ function renderIssueList(): void {
       item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
       item.dataset.issueId = issue.id;
       const stateClass = issue.state === "closed" ? " state-closed" : "";
-      item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}`;
+      const unseen =
+        issue.id === selectedIssueId
+          ? 0
+          : unseenComments(seenComments, issue.id, issue.commentsCount);
+      const newComments =
+        unseen > 0
+          ? `<span class="badge new-comments" title="${unseen} new comment${unseen === 1 ? "" : "s"}">+${unseen} &#128172;</span>`
+          : "";
+      item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}${newComments}`;
       item.addEventListener("click", () => {
         selectedIssueId = issue.id;
         showNewIssueForm = false;
@@ -349,6 +394,18 @@ function renderIssueList(): void {
   }
 }
 
+function markdownSources(): {
+  issues: { number: number; title: string }[];
+  users: string[];
+  labels: string[];
+} {
+  return {
+    issues: currentIssues.map(({ number, title }) => ({ number, title })),
+    users: currentAvailableAssignableUsers,
+    labels: currentAvailableLabels,
+  };
+}
+
 function renderNewIssueForm(): void {
   const detail = byId<HTMLDivElement>("issue-detail");
   const milestoneOptions = currentMilestones
@@ -359,6 +416,18 @@ function renderNewIssueForm(): void {
     .join("");
   detail.innerHTML = `
     <h3>New Issue</h3>
+
+    ${
+      issueTemplates.length > 0
+        ? `<label for="new-issue-template">Template</label>
+    <select id="new-issue-template">
+      <option value="">No template</option>
+      ${issueTemplates
+        .map((template, index) => `<option value="${index}">${escapeHtml(template.name)}</option>`)
+        .join("")}
+    </select>`
+        : ""
+    }
 
     <label for="new-issue-title">Title</label>
     <input id="new-issue-title" type="text" />
@@ -376,6 +445,26 @@ function renderNewIssueForm(): void {
     <button id="new-issue-cancel" type="button">Cancel</button>
   `;
 
+  enhanceMarkdownEditor(byId<HTMLTextAreaElement>("new-issue-body"), markdownSources);
+
+  let templateLabels: string[] = [];
+  document.getElementById("new-issue-template")?.addEventListener("change", (event) => {
+    const template = issueTemplates[Number((event.target as HTMLSelectElement).value)];
+    templateLabels = template ? [...template.labels] : [];
+    if (!template) {
+      return;
+    }
+    const titleInput = byId<HTMLInputElement>("new-issue-title");
+    if (!titleInput.value.trim() && template.title) {
+      titleInput.value = template.title;
+    }
+    // Never overwrite what the user already typed: append after it.
+    const bodyInput = byId<HTMLTextAreaElement>("new-issue-body");
+    bodyInput.value = bodyInput.value.trim()
+      ? `${bodyInput.value}\n\n${template.body}`
+      : template.body;
+  });
+
   byId<HTMLButtonElement>("new-issue-cancel").addEventListener("click", () => {
     showNewIssueForm = false;
     renderIssueDetail();
@@ -389,9 +478,65 @@ function renderNewIssueForm(): void {
     }
     const body = byId<HTMLTextAreaElement>("new-issue-body").value;
     const milestoneId = byId<HTMLSelectElement>("new-issue-milestone").value || null;
-    post({ type: "createIssue", input: { title, body, milestoneId } });
+    post({
+      type: "createIssue",
+      input: {
+        title,
+        body,
+        milestoneId,
+        ...(templateLabels.length > 0 ? { labels: templateLabels } : {}),
+      },
+    });
     showNewIssueForm = false;
   });
+}
+
+/** Renders the cached comments of `issue` (or a loading note) and fetches them when stale. */
+function showCommentsFor(issue: IssueView): void {
+  // Opening an issue marks its comments as seen; only re-render the list when that changed anything.
+  const nextSeen = markSeen(seenComments, issue.id, issue.commentsCount);
+  if (nextSeen !== seenComments) {
+    seenComments = nextSeen;
+    uiPrefs = { ...uiPrefs, seenComments };
+    post({ type: "saveUiPrefs", prefs: uiPrefs });
+    renderIssueList();
+  }
+
+  const cached = commentsByIssue.get(issue.id);
+  const stale = commentsFetchedAtCount.get(issue.id) !== issue.commentsCount;
+  renderComments(issue.id);
+  if ((!cached || stale) && !commentRequestsInFlight.has(issue.id)) {
+    commentRequestsInFlight.add(issue.id);
+    post({ type: "requestComments", issueId: issue.id });
+  }
+}
+
+function renderComments(issueId: string): void {
+  const container = document.getElementById("issue-comments");
+  if (!container || selectedIssueId !== issueId) {
+    return;
+  }
+  const comments = commentsByIssue.get(issueId);
+  if (!comments) {
+    container.textContent = "Loading comments…";
+    return;
+  }
+  if (comments.length === 0) {
+    container.innerHTML = `<p class="read-only-note">No comments yet.</p>`;
+    return;
+  }
+  container.innerHTML = comments
+    .map(
+      (comment) => `<article class="comment">
+        <header><strong>${escapeHtml(comment.author)}</strong> <span class="comment-date">${formatDate(comment.createdAt)}</span>${
+          comment.url
+            ? ` <a href="${escapeAttr(safeHref(comment.url))}" target="_blank" rel="noopener noreferrer">link</a>`
+            : ""
+        }</header>
+        <div class="md-preview">${renderMarkdown(comment.body)}</div>
+      </article>`,
+    )
+    .join("");
 }
 
 function renderIssueDetail(): void {
@@ -487,7 +632,33 @@ function renderIssueDetail(): void {
 
     <button id="issue-save" ${canWrite ? "" : "disabled"}>Save</button>
     ${canWrite ? "" : '<p class="read-only-note">Your account does not have write access to issues.</p>'}
+
+    <h3>Comments (${issue.commentsCount})</h3>
+    <div id="issue-comments" aria-live="polite"></div>
+    ${
+      canWrite
+        ? `<label for="comment-body">Add a comment</label>
+    <textarea id="comment-body"></textarea>
+    <button id="comment-add" type="button">Comment</button>`
+        : ""
+    }
   `;
+
+  enhanceMarkdownEditor(byId<HTMLTextAreaElement>("issue-body"), markdownSources);
+  if (canWrite) {
+    enhanceMarkdownEditor(byId<HTMLTextAreaElement>("comment-body"), markdownSources);
+    byId<HTMLButtonElement>("comment-add").addEventListener("click", () => {
+      const body = byId<HTMLTextAreaElement>("comment-body").value;
+      if (!body.trim()) {
+        showError("A comment cannot be empty.");
+        return;
+      }
+      commentSubmitIssueId = issue.id;
+      byId<HTMLButtonElement>("comment-add").disabled = true;
+      post({ type: "addComment", issueId: issue.id, body });
+    });
+  }
+  showCommentsFor(issue);
 
   byId<HTMLButtonElement>("issue-create-branch").addEventListener("click", () => {
     post({ type: "createBranchForIssue", id: issue.id });
@@ -789,6 +960,7 @@ function setIssueFilter(next: IssueFilter): void {
   issueListPageSize = LIST_PAGE_SIZE;
   syncFilterControls();
   renderIssueList();
+  renderBoardIfVisible();
 }
 
 function persistListPrefs(): void {
@@ -847,11 +1019,126 @@ function syncFilterControls(): void {
     !matching || !savedFilters.some((entry) => entry.name === matching.name);
 }
 
-function setActiveTab(tab: "issues" | "milestones"): void {
-  byId<HTMLButtonElement>("tab-issues").classList.toggle("active", tab === "issues");
-  byId<HTMLButtonElement>("tab-milestones").classList.toggle("active", tab === "milestones");
-  byId<HTMLDivElement>("view-issues").hidden = tab !== "issues";
-  byId<HTMLDivElement>("view-milestones").hidden = tab !== "milestones";
+type TabName = "issues" | "milestones" | "board";
+
+function activeTab(): TabName {
+  for (const tab of ["milestones", "board"] as const) {
+    if (byId<HTMLButtonElement>(`tab-${tab}`).classList.contains("active")) {
+      return tab;
+    }
+  }
+  return "issues";
+}
+
+function setActiveTab(tab: TabName): void {
+  for (const name of ["issues", "milestones", "board"] as const) {
+    byId<HTMLButtonElement>(`tab-${name}`).classList.toggle("active", tab === name);
+    byId<HTMLDivElement>(`view-${name}`).hidden = tab !== name;
+  }
+  if (tab === "board") {
+    renderBoard();
+  }
+}
+
+function renderBoardIfVisible(): void {
+  if (activeTab() === "board") {
+    renderBoard();
+  }
+}
+
+/** Applies a board move, enforcing write access client-side too (the host re-checks). */
+function moveIssueToColumn(issueId: string, column: BoardColumnId): void {
+  const issue = currentIssues.find((candidate) => candidate.id === issueId);
+  if (!issue) {
+    return;
+  }
+  if (!currentCapabilities.canWriteIssues) {
+    showError("Your account does not have write access to issues.");
+    return;
+  }
+  const patch = planBoardMove(issue, column);
+  if (patch) {
+    post({ type: "updateIssue", id: issue.id, patch });
+  }
+}
+
+function renderBoard(): void {
+  const container = byId<HTMLDivElement>("board");
+  container.innerHTML = "";
+  const canWrite = currentCapabilities.canWriteIssues;
+  const visible = sortIssues(
+    filterIssues(currentIssues, issueFilter, currentUser?.username ?? null),
+    issueSort,
+  );
+  byId<HTMLParagraphElement>("board-note").textContent =
+    `${visible.length} issue${visible.length === 1 ? "" : "s"} shown. The filters of the Issues tab apply.` +
+    (canWrite ? " Drag a card, or use its Move menu, to change its status." : "");
+
+  for (const column of buildBoard(visible)) {
+    const section = document.createElement("section");
+    section.className = "board-column";
+    section.setAttribute("aria-label", `${column.title}, ${column.issues.length} issues`);
+    const header = document.createElement("h3");
+    header.textContent = `${column.title} (${column.issues.length})`;
+    section.appendChild(header);
+
+    section.addEventListener("dragover", (event) => {
+      if (canWrite) {
+        event.preventDefault();
+        section.classList.add("drop-target");
+      }
+    });
+    section.addEventListener("dragleave", () => section.classList.remove("drop-target"));
+    section.addEventListener("drop", (event) => {
+      event.preventDefault();
+      section.classList.remove("drop-target");
+      const issueId = event.dataTransfer?.getData("text/plain");
+      if (issueId) {
+        moveIssueToColumn(issueId, column.id);
+      }
+    });
+
+    for (const issue of column.issues) {
+      const card = document.createElement("article");
+      card.className = "board-card";
+      card.draggable = canWrite;
+      card.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("text/plain", issue.id);
+      });
+
+      const title = document.createElement("button");
+      title.type = "button";
+      title.className = "board-card-title";
+      title.innerHTML = `<span class="number">#${issue.number}</span> ${escapeHtml(issue.title)}`;
+      title.addEventListener("click", () => {
+        selectedIssueId = issue.id;
+        showNewIssueForm = false;
+        setActiveTab("issues");
+        renderIssueList();
+        renderIssueDetail();
+      });
+      card.appendChild(title);
+      card.insertAdjacentHTML("beforeend", renderLabelBadges(issue.labels));
+
+      const move = document.createElement("select");
+      move.className = "board-card-move";
+      move.disabled = !canWrite;
+      move.setAttribute("aria-label", `Move issue #${issue.number}`);
+      move.innerHTML =
+        `<option value="">Move to…</option>` +
+        BOARD_COLUMNS.filter((target) => target.id !== column.id)
+          .map((target) => `<option value="${target.id}">${escapeHtml(target.title)}</option>`)
+          .join("");
+      move.addEventListener("change", () => {
+        if (move.value) {
+          moveIssueToColumn(issue.id, move.value as BoardColumnId);
+        }
+      });
+      card.appendChild(move);
+      section.appendChild(card);
+    }
+    container.appendChild(section);
+  }
 }
 
 byId<HTMLButtonElement>("tab-issues").addEventListener("click", () => {
@@ -928,6 +1215,7 @@ byId<HTMLSelectElement>("milestone-state-filter").addEventListener("change", (ev
 byId<HTMLButtonElement>("tab-milestones").addEventListener("click", () =>
   setActiveTab("milestones"),
 );
+byId<HTMLButtonElement>("tab-board").addEventListener("click", () => setActiveTab("board"));
 byId<HTMLButtonElement>("issue-new").addEventListener("click", () => {
   selectedIssueId = null;
   showNewIssueForm = true;
@@ -1032,11 +1320,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
   if (message.type === "state") {
     clearError();
     byId<HTMLDivElement>("repository-picker").hidden = true;
-    setActiveTab(
-      byId<HTMLButtonElement>("tab-milestones").classList.contains("active")
-        ? "milestones"
-        : "issues",
-    );
+    setActiveTab(activeTab());
 
     const snapshot: StateSnapshot = {
       issues: message.issues,
@@ -1046,6 +1330,10 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
       availableLabels: message.availableLabels,
       availableAssignableUsers: message.availableAssignableUsers,
     };
+    if (!templatesRequested) {
+      templatesRequested = true;
+      post({ type: "requestIssueTemplates" });
+    }
     lastFetchedAt = message.dataFetchedAt;
     updateCacheBanner();
     setRefreshing(false);
@@ -1067,6 +1355,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     byId<HTMLButtonElement>("issue-new").disabled = !currentCapabilities.canWriteIssues;
     byId<HTMLButtonElement>("milestone-new").disabled = !currentCapabilities.canWriteMilestones;
     renderIssueList();
+    renderBoardIfVisible();
     // Skip re-rendering the create form while it's open — the "state"
     // handler runs on every refresh/edit, and re-rendering would wipe
     // out an in-progress, unsaved draft (see #49).
@@ -1086,9 +1375,32 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     setIssueFilter({ ...issueFilter, milestone: null });
     setActiveTab("issues");
     renderIssueDetail();
+  } else if (message.type === "comments") {
+    commentRequestsInFlight.delete(message.issueId);
+    commentsByIssue.set(message.issueId, message.comments);
+    commentsFetchedAtCount.set(
+      message.issueId,
+      currentIssues.find((candidate) => candidate.id === message.issueId)?.commentsCount ??
+        message.comments.length,
+    );
+    if (commentSubmitIssueId === message.issueId) {
+      commentSubmitIssueId = null;
+      const box = document.getElementById("comment-body") as HTMLTextAreaElement | null;
+      if (box) {
+        box.value = "";
+      }
+      const button = document.getElementById("comment-add") as HTMLButtonElement | null;
+      if (button) {
+        button.disabled = false;
+      }
+    }
+    renderComments(message.issueId);
+  } else if (message.type === "issueTemplates") {
+    issueTemplates = message.templates;
   } else if (message.type === "uiPrefs") {
     uiPrefs = { ...message.prefs };
     savedFilters = readSavedFilters(uiPrefs);
+    seenComments = readSeenComments(uiPrefs);
     ({ sort: issueSort, group: issueGroup } = readListPrefs(uiPrefs));
     syncFilterControls();
     renderIssueList();
