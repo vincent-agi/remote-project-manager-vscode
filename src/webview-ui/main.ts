@@ -5,6 +5,7 @@
 // because the host and webview programs have separate `rootDir`s.
 
 import { hasStateChanged } from "./state-diff.js";
+import { moveSelection, shortcutFor, SHORTCUT_HELP } from "./keyboard-shortcuts.js";
 import {
   computeMilestoneProgress,
   describeDue,
@@ -151,6 +152,7 @@ let selectedMilestoneId: string | null = null;
 let issueFilter: IssueFilter = EMPTY_FILTER;
 let uiPrefs: Record<string, unknown> = {};
 let savedFilters: SavedFilter[] = [];
+let visibleIssueIds: string[] = [];
 let issueSort: IssueSort = "default";
 let issueGroup: IssueGroup = "none";
 let milestoneStateFilter: "all" | "open" | "closed" = "all";
@@ -237,6 +239,7 @@ function renderIssueList(): void {
     new Map(currentMilestones.map((milestone) => [milestone.id, milestone.title])),
   );
 
+  visibleIssueIds = [];
   // Paging counts issues across sections: stop once the page is full.
   let remainingSlots = issueListPageSize;
   for (const section of sections) {
@@ -252,8 +255,10 @@ function renderIssueList(): void {
       list.appendChild(header);
     }
     for (const issue of visible) {
+      visibleIssueIds.push(issue.id);
       const item = document.createElement("div");
       item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
+      item.dataset.issueId = issue.id;
       const stateClass = issue.state === "closed" ? " state-closed" : "";
       item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}`;
       item.addEventListener("click", () => {
@@ -859,6 +864,85 @@ byId<HTMLButtonElement>("milestone-new").addEventListener("click", () => {
 });
 byId<HTMLButtonElement>("refresh-button").addEventListener("click", () => {
   post({ type: "requestState", forceRefresh: true });
+});
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
+}
+
+function toggleShortcutHelp(force?: boolean): void {
+  const help = byId<HTMLDivElement>("shortcut-help");
+  help.hidden = force === undefined ? !help.hidden : !force;
+  if (!help.hidden) {
+    help.innerHTML = `<h3>Keyboard shortcuts</h3><dl>${SHORTCUT_HELP.map(
+      (entry) =>
+        `<dt><kbd>${escapeHtml(entry.keys)}</kbd></dt><dd>${escapeHtml(entry.description)}</dd>`,
+    ).join("")}</dl><p>Press <kbd>Esc</kbd> to close.</p>`;
+  }
+}
+
+function selectIssueByKeyboard(direction: "next" | "previous"): void {
+  const id = moveSelection(visibleIssueIds, selectedIssueId, direction);
+  if (id === null || id === selectedIssueId) {
+    return;
+  }
+  selectedIssueId = id;
+  showNewIssueForm = false;
+  renderIssueList();
+  renderIssueDetail();
+  document
+    .querySelector<HTMLElement>(`#issue-list .item[data-issue-id="${CSS.escape(id)}"]`)
+    ?.scrollIntoView({ block: "nearest" });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    toggleShortcutHelp(false);
+    return;
+  }
+  const action = shortcutFor(event, isEditableTarget(event.target));
+  const issuesVisible = !byId<HTMLDivElement>("view-issues").hidden;
+  switch (action) {
+    case "next":
+    case "previous":
+      if (issuesVisible) {
+        event.preventDefault();
+        selectIssueByKeyboard(action);
+      }
+      return;
+    case "edit":
+      if (issuesVisible && selectedIssueId !== null) {
+        const title = document.getElementById("issue-title") as HTMLInputElement | null;
+        if (title && !title.disabled) {
+          event.preventDefault();
+          title.focus();
+          title.select();
+        }
+      }
+      return;
+    case "search":
+      if (issuesVisible) {
+        event.preventDefault();
+        byId<HTMLInputElement>("issue-search").focus();
+      }
+      return;
+    case "refresh":
+      post({ type: "requestState", forceRefresh: true });
+      return;
+    case "help":
+      toggleShortcutHelp();
+      return;
+    case null:
+      return;
+  }
 });
 
 window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {

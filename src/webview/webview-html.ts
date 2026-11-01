@@ -31,6 +31,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 
   <div id="error-banner" class="error-banner" hidden></div>
   <div id="toast" class="toast" hidden></div>
+  <div id="shortcut-help" class="shortcut-help" role="dialog" aria-label="Keyboard shortcuts" hidden></div>
 
   <div id="repository-picker" class="repository-picker" hidden>
     <p>Multiple repositories were found in this workspace. Pick one:</p>

@@ -392,3 +392,33 @@ body {
   color: var(--vscode-editorError-foreground);
   font-weight: 600;
 }
+
+.shortcut-help {
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  z-index: 10;
+  padding: 8px 14px;
+  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+  background-color: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  border-radius: 4px;
+}
+
+.shortcut-help dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.shortcut-help dd {
+  margin: 0;
+}
+
+kbd {
+  padding: 0 5px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  border-radius: 3px;
+}
