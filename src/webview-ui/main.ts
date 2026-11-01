@@ -155,7 +155,7 @@ type OutboundMessage =
   | { type: "comments"; issueId: string; comments: CommentView[] }
   | { type: "settings"; entries: SettingEntryView[] }
   | { type: "branchNamePreview"; pattern: string; example: string; warnings: string[] }
-  | { type: "repositoryOptions"; options: RepositoryOptionView[] }
+  | { type: "repositoryOptions"; options: RepositoryOptionView[]; selectedId?: string }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
   | { type: "openNewMilestoneForm" }
@@ -1029,6 +1029,22 @@ function renderRepositoryPicker(options: RepositoryOptionView[]): void {
   }
 }
 
+/** A persistent drop-down to switch repository once one is chosen and the workspace has several. */
+function renderRepositorySwitcher(options: RepositoryOptionView[], selectedId: string): void {
+  const select = byId<HTMLSelectElement>("repository-switcher");
+  select.innerHTML = options
+    .map(
+      (option) =>
+        `<option value="${escapeAttr(option.id)}" ${option.id === selectedId ? "selected" : ""}>${escapeHtml(option.label)}</option>`,
+    )
+    .join("");
+  select.hidden = options.length < 2;
+}
+
+byId<HTMLSelectElement>("repository-switcher").addEventListener("change", (event) => {
+  post({ type: "selectRepository", id: (event.target as HTMLSelectElement).value });
+});
+
 function renderIssueLabelFilterOptions(): void {
   const select = byId<HTMLSelectElement>("issue-label-filter");
   const previousValue = select.value;
@@ -1627,7 +1643,11 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     }
   } else if (message.type === "repositoryOptions") {
     clearError();
-    renderRepositoryPicker(message.options);
+    if (message.selectedId === undefined) {
+      renderRepositoryPicker(message.options);
+    } else {
+      renderRepositorySwitcher(message.options, message.selectedId);
+    }
   } else if (message.type === "selectIssue") {
     selectedIssueId = message.id;
     showNewIssueForm = false;

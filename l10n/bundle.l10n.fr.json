@@ -211,5 +211,9 @@
   "One per line, e.g. CLAUDE.md, AGENTS.md, .cursorrules. Replaces the single file above.": "Un par ligne, par ex. CLAUDE.md, AGENTS.md, .cursorrules. Remplace le fichier unique ci-dessus.",
   "Keep the AI context files up to date": "Garder les fichiers de contexte IA à jour",
   "Rewrites them when the issues of the last exported milestone change.": "Les réécrit quand les issues du dernier jalon exporté changent.",
-  "Expected a list of text lines.": "Une liste de lignes de texte est attendue."
+  "Expected a list of text lines.": "Une liste de lignes de texte est attendue.",
+  "This workspace has only one repository.": "Cet espace de travail ne contient qu'un seul dépôt.",
+  "Current repository": "Dépôt actuel",
+  "Select the repository to work with": "Choisissez le dépôt avec lequel travailler",
+  "Repository": "Dépôt"
 }

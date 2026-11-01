@@ -182,6 +182,13 @@ function createPanel(context: vscode.ExtensionContext): vscode.WebviewPanel {
  * Returns a single resolved repository, or a list of candidates for the
  * webview picker when more than one workspace folder matches.
  */
+/** `workspaceState` key remembering which workspace folder's repository the user picked. */
+const SELECTED_REPOSITORY_KEY = "remoteProjectManager.selectedRepositoryFolder";
+/** The remembered repository folder; used by {@link resolveRepository} when several folders qualify. */
+let selectedRepositoryFolder: string | undefined;
+/** The sidebar provider, so a repository switch from the panel can refresh it. */
+let activeTreeProvider: MyIssuesTreeDataProvider | undefined;
+
 async function resolveRepository(): Promise<RepositoryResolution> {
   const config = vscode.workspace.getConfiguration("remoteProjectManager");
   const providerKindSetting = config.get<ProviderKind>("provider", "github");
@@ -201,6 +208,7 @@ async function resolveRepository(): Promise<RepositoryResolution> {
     provider: providerKindSetting,
     repository: repositorySetting,
     fallbackFolderPath: folders[0]?.uri.fsPath,
+    preferredFolderPath: selectedRepositoryFolder,
   });
 }
 
@@ -753,8 +761,13 @@ async function openPanelImpl(
     }
     activeController = controller;
     panel.webview.onDidReceiveMessage((message: InboundMessage) => {
+      if (message.type === "selectRepository") {
+        void switchRepository(context, message.id);
+        return;
+      }
       void controller.handleMessage(message);
     });
+    postRepositorySwitcher(panel, resolution.alternatives, resolution.folderPath);
     if (pendingAction) {
       // A "refresh" pendingAction already sends its own requestState
       // (forceRefresh: true) below — sending the plain one first would
@@ -793,6 +806,7 @@ async function openPanelImpl(
       if (!chosen) {
         return;
       }
+      await rememberRepository(context, chosen.folderPath);
       try {
         controller = await buildController(
           context,
@@ -807,6 +821,13 @@ async function openPanelImpl(
         return;
       }
       activeController = controller;
+      activeRepositoryKey = repositoryKey({
+        kind: "resolved",
+        providerKind: chosen.provider,
+        repository: chosen.repository,
+        folderPath: chosen.folderPath,
+      });
+      postRepositorySwitcher(panel, candidates, chosen.folderPath);
       if (pendingAction) {
         if (pendingAction.kind !== "refresh") {
           void controller.handleMessage({ type: "requestState" });
@@ -815,8 +836,90 @@ async function openPanelImpl(
       } else {
         void controller.handleMessage({ type: "requestState" });
       }
+      // The sidebar was empty while the choice was pending: let it follow.
+      activeTreeProvider?.invalidateConnection();
     }
   });
+}
+
+/** Sets the `remoteProjectManager.multiRepo` context key that shows the sidebar's repository switcher. */
+async function updateMultiRepositoryContext(): Promise<void> {
+  const resolution = await resolveRepository();
+  const multiple =
+    resolution.kind === "candidates" ||
+    (resolution.kind === "resolved" && (resolution.alternatives?.length ?? 0) > 1);
+  await vscode.commands.executeCommand("setContext", "remoteProjectManager.multiRepo", multiple);
+}
+
+/** Tells the webview which repositories exist so it can show the persistent switcher. */
+function postRepositorySwitcher(
+  panel: vscode.WebviewPanel,
+  alternatives: readonly RepositoryCandidate[] | undefined,
+  selectedFolderPath: string | undefined,
+): void {
+  if (!alternatives || alternatives.length < 2 || !selectedFolderPath) {
+    return;
+  }
+  void panel.webview.postMessage({
+    type: "repositoryOptions",
+    options: alternatives.map(toRepositoryOptionView),
+    selectedId: selectedFolderPath,
+  });
+}
+
+/** Remembers `folderPath` as the repository to use when several workspace folders qualify. */
+async function rememberRepository(
+  context: vscode.ExtensionContext,
+  folderPath: string,
+): Promise<void> {
+  selectedRepositoryFolder = folderPath;
+  await context.workspaceState.update(SELECTED_REPOSITORY_KEY, folderPath);
+}
+
+/**
+ * Switches the whole extension (sidebar, status bar, panel, commands) to
+ * another workspace repository and remembers the choice.
+ */
+async function switchRepository(
+  context: vscode.ExtensionContext,
+  folderPath: string,
+): Promise<void> {
+  await rememberRepository(context, folderPath);
+  activeTreeProvider?.invalidateConnection();
+  if (activeTreeProvider) {
+    await syncWithRepository(context, activeTreeProvider);
+  }
+}
+
+/** "Select Repository" command: pick among the workspace folders' repositories. */
+async function selectRepository(context: vscode.ExtensionContext): Promise<void> {
+  const resolution = await resolveRepository();
+  const options =
+    resolution.kind === "candidates"
+      ? resolution.candidates
+      : resolution.kind === "resolved"
+        ? (resolution.alternatives ?? [])
+        : [];
+  if (options.length < 2) {
+    void vscode.window.showInformationMessage(
+      vscode.l10n.t("This workspace has only one repository."),
+    );
+    return;
+  }
+  const currentFolder = resolution.kind === "resolved" ? resolution.folderPath : undefined;
+  const picked = await vscode.window.showQuickPick(
+    options.map((candidate) => ({
+      label: candidate.folderName,
+      description: `${candidate.provider}:${candidate.repository}`,
+      detail:
+        candidate.folderPath === currentFolder ? vscode.l10n.t("Current repository") : undefined,
+      candidate,
+    })),
+    { title: vscode.l10n.t("Select the repository to work with") },
+  );
+  if (picked) {
+    await switchRepository(context, picked.candidate.folderPath);
+  }
 }
 
 /** Localized title of a tree group. */
@@ -1034,6 +1137,7 @@ async function syncWithRepository(
 ): Promise<void> {
   logger.info("Re-syncing with the loaded repository");
   treeDataProvider.refresh();
+  void updateMultiRepositoryContext();
   if (!activePanel || openPanelInFlight) {
     return;
   }
@@ -2061,7 +2165,9 @@ export interface RemoteProjectManagerApi {
 }
 
 export function activate(context: vscode.ExtensionContext): RemoteProjectManagerApi {
+  selectedRepositoryFolder = context.workspaceState.get<string>(SELECTED_REPOSITORY_KEY);
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
+  activeTreeProvider = treeDataProvider;
   const statusBar = new IssueStatusBar();
   logger.info("Remote Project Manager activated");
   const editorIntegration = registerEditorIntegration(context, {
@@ -2128,6 +2234,9 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
         `${context.extension.id}#getStarted`,
         false,
       );
+    }),
+    vscode.commands.registerCommand("remoteProjectManager.selectRepository", () => {
+      void selectRepository(context);
     }),
     vscode.commands.registerCommand("remoteProjectManager.runDiagnostics", () => {
       void runDiagnostics(context);

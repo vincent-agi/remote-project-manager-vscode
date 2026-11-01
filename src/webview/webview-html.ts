@@ -47,6 +47,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
     <button id="tab-milestones" class="tab" type="button" role="tab" aria-selected="false" aria-controls="view-milestones">${t("Milestones")}</button>
     <button id="tab-settings" class="tab" type="button" role="tab" aria-selected="false" aria-controls="view-settings">${t("Settings")}</button>
     <button id="refresh-button" class="tab refresh" type="button" title="${t("Refetch from the remote, bypassing the cache")}">&#8635; ${t("Refresh")}</button>
+    <select id="repository-switcher" class="repository-switcher" title="${t("Repository")}" aria-label="${t("Repository")}" hidden></select>
   </div>
 
   <div id="error-banner" class="error-banner" role="alert" hidden></div>

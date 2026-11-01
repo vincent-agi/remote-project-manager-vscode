@@ -149,6 +149,10 @@ New to the extension? Run **Remote Project Manager: Open Walkthrough** (or click
 
 The extension follows VS Code's display language: English and French are provided (manifest, notifications, panel and Git Graph). To add a language, add `package.nls.<lang>.json` and `l10n/bundle.l10n.<lang>.json` next to the French ones, plus a table like the one in `src/webview-ui/translations.ts`; tests fail if a message is left untranslated or a placeholder is lost. The walkthrough pages in `media/walkthrough` are English only.
 
+### Several repositories in one workspace
+
+With several workspace folders on different repositories, the first time you open the panel you pick one. The choice is remembered per workspace and followed by the sidebar, the status bar and every command. Switch at any time from the drop-down in the panel, the sidebar's title bar, or **Remote Project Manager: Select Repository**.
+
 ### Keyboard Shortcuts
 
 Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kbd>+<kbd>⌥</kbd>+<kbd>R</kbd> instead of <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>, followed by the second key:

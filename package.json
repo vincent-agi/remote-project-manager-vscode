@@ -110,6 +110,11 @@
       {
         "command": "remoteProjectManager.openWalkthrough",
         "title": "%command.openWalkthrough.title%"
+      },
+      {
+        "command": "remoteProjectManager.selectRepository",
+        "title": "%command.selectRepository.title%",
+        "icon": "$(repo)"
       }
     ],
     "viewsContainers": {
@@ -304,6 +309,13 @@
           "command": "remoteProjectManager.createIssueFromSelection",
           "when": "editorHasSelection",
           "group": "9_remoteProjectManager@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "remoteProjectManager.selectRepository",
+          "when": "view == remoteProjectManager.sidebar && remoteProjectManager.multiRepo",
+          "group": "navigation"
         }
       ]
     },

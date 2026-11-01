@@ -116,6 +116,11 @@ export type RepositoryResolution =
       readonly providerKind: ProviderKind;
       readonly repository: string;
       readonly folderPath?: string;
+      /**
+       * Every workspace repository, set only when there are several: the
+       * resolved one was picked among them (by the user's remembered choice).
+       */
+      readonly alternatives?: RepositoryCandidate[];
     }
   | { readonly kind: "candidates"; readonly candidates: RepositoryCandidate[] }
   | { readonly kind: "none" };
@@ -134,6 +139,8 @@ export function chooseRepository(
     readonly provider: ProviderKind;
     readonly repository: string;
     readonly fallbackFolderPath?: string;
+    /** Folder of the repository the user picked before; honoured while it is still a candidate. */
+    readonly preferredFolderPath?: string;
   },
 ): RepositoryResolution {
   if (candidates.length === 1) {
@@ -146,6 +153,18 @@ export function chooseRepository(
     };
   }
   if (candidates.length > 1) {
+    const preferred = candidates.find(
+      (candidate) => candidate.folderPath === settings.preferredFolderPath,
+    );
+    if (preferred) {
+      return {
+        kind: "resolved",
+        providerKind: preferred.provider,
+        repository: preferred.repository,
+        folderPath: preferred.folderPath,
+        alternatives: [...candidates],
+      };
+    }
     return { kind: "candidates", candidates: [...candidates] };
   }
   if (settings.repository.includes("/")) {
