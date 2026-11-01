@@ -141,6 +141,17 @@ Beyond the panel, the extension contributes Command Palette entries for a standa
 
 The "active issue" for these commands is resolved from your current branch name (matching `${issue_id}` in `remoteProjectManager.branchNamePattern`), falling back to a picker when it can't be determined.
 
+### Keyboard Shortcuts
+
+Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kbd>+<kbd>⌥</kbd>+<kbd>R</kbd> instead of <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>, followed by the second key:
+
+| Shortcut                                | Command                                 |
+| --------------------------------------- | --------------------------------------- |
+| <kbd>Ctrl+Alt+R</kbd> then <kbd>C</kbd> | Compose Commit (Conventional + Gitmoji) |
+| <kbd>Ctrl+Alt+R</kbd> then <kbd>G</kbd> | Pick Gitmoji                            |
+| <kbd>Ctrl+Alt+R</kbd> then <kbd>N</kbd> | New Issue                               |
+| <kbd>Ctrl+Alt+R</kbd> then <kbd>R</kbd> | Refresh                                 |
+
 ### Extension Settings
 
 | Setting                                       | Type                   | Default                             | Description                                                                                                                                                                        |

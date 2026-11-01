@@ -29,6 +29,10 @@ import { PanelController } from "./webview/panel-controller";
 import type { InboundMessage, RepositoryOptionView } from "./webview/messages";
 import { getWebviewHtml } from "./webview/webview-html";
 import { extractIssueNumberFromBranch } from "./core/git/branch-issue-ref";
+import { IssueStatusBar } from "./status-bar";
+import { logger } from "./logger";
+import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
+import type { SyncState } from "./core/status/status-bar-model";
 import {
   buildCommitMessage,
   COMMIT_TYPES,
@@ -659,8 +663,15 @@ async function openPanelImpl(
 class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary> {
   private connection: { provider: IProjectProvider; currentUser: IAuthenticatedUser } | undefined;
   private connectionKey: string | undefined;
+  private lastFolderPath: string | undefined;
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changeEmitter.event;
+  private readonly syncEmitter = new vscode.EventEmitter<{
+    sync: SyncState;
+    folderPath: string | undefined;
+  }>();
+  /** Fires with the connection state after every tree load, for the status bar. */
+  readonly onDidSync = this.syncEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -686,6 +697,7 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
       vscode.TreeItemCollapsibleState.None,
     );
     item.tooltip = element.url;
+    item.contextValue = "issue";
     item.iconPath = new vscode.ThemeIcon("issues");
     item.command = {
       command: "remoteProjectManager.openIssueFromTree",
@@ -696,14 +708,33 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
   }
 
   async getChildren(): Promise<MyIssueSummary[]> {
+    let folderPath: string | undefined;
     try {
+      this.syncEmitter.fire({ sync: { kind: "loading" }, folderPath: this.lastFolderPath });
       const connection = await this.getConnection();
+      folderPath = this.lastFolderPath;
       if (!connection) {
+        this.syncEmitter.fire({ sync: { kind: "unavailable" }, folderPath });
         return [];
       }
       const issues = await connection.provider.listIssues();
+      this.syncEmitter.fire({
+        sync: {
+          kind: "ok",
+          issues: issues.map(({ id, number, title }) => ({ id, number, title })),
+        },
+        folderPath,
+      });
       return selectMyOpenIssues(issues, connection.currentUser.username);
     } catch (error) {
+      logger.warn(
+        isAuthError(error) ? "Sidebar: authentication failed" : "Sidebar: could not load issues",
+        error,
+      );
+      this.syncEmitter.fire({
+        sync: { kind: isAuthError(error) ? "auth-error" : "unavailable" },
+        folderPath: folderPath ?? this.lastFolderPath,
+      });
       // Drop the cached connection on an auth failure (e.g. a revoked
       // GitLab token) so the next reveal re-runs getConnection() and
       // goes through resolveAndConnect's re-prompt flow, instead of
@@ -721,6 +752,7 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
     // Re-resolve every time (cheap local `git remote get-url`) so a
     // connection never outlives the repository it was built for.
     const resolution = await resolveRepository();
+    this.lastFolderPath = resolution.kind === "resolved" ? resolution.folderPath : undefined;
     const key = repositoryKey(resolution);
     if (this.connection && this.connectionKey === key) {
       return this.connection;
@@ -751,6 +783,7 @@ async function syncWithRepository(
   context: vscode.ExtensionContext,
   treeDataProvider: MyIssuesTreeDataProvider,
 ): Promise<void> {
+  logger.info("Re-syncing with the loaded repository");
   treeDataProvider.refresh();
   if (!activePanel || openPanelInFlight) {
     return;
@@ -1148,7 +1181,10 @@ async function pickGitmojiCommand(context: vscode.ExtensionContext): Promise<voi
 let lastIssueContext: string | undefined;
 
 /** Copies the active issue's context (#57) to the clipboard for pasting into an AI coding assistant. */
-async function copyIssueContext(context: vscode.ExtensionContext): Promise<void> {
+async function copyIssueContext(
+  context: vscode.ExtensionContext,
+  element?: MyIssueSummary,
+): Promise<void> {
   const connection = await getActiveConnection(context);
   if (!connection) {
     void vscode.window.showErrorMessage(
@@ -1159,7 +1195,9 @@ async function copyIssueContext(context: vscode.ExtensionContext): Promise<void>
   const { provider, cwd } = connection;
   const gitService = new SimpleGitService();
 
-  let issue = await resolveActiveIssueViaBranch(gitService, cwd, provider);
+  let issue = element
+    ? await provider.getIssue(element.id)
+    : await resolveActiveIssueViaBranch(gitService, cwd, provider);
   if (!issue) {
     const issues = await provider.listIssues();
     const picked = await vscode.window.showQuickPick(
@@ -1207,7 +1245,10 @@ function buildCompareUrl(
 }
 
 /** Generates a PR/MR pre-filled from the active issue, its commits, and its milestone (#58). */
-async function createPrFromIssue(context: vscode.ExtensionContext): Promise<void> {
+async function createPrFromIssue(
+  context: vscode.ExtensionContext,
+  element?: MyIssueSummary,
+): Promise<void> {
   const connection = await getActiveConnection(context);
   if (!connection) {
     void vscode.window.showErrorMessage(
@@ -1218,7 +1259,9 @@ async function createPrFromIssue(context: vscode.ExtensionContext): Promise<void
   const { provider, cwd } = connection;
   const gitService = new SimpleGitService();
 
-  const issue = await resolveActiveIssueViaBranch(gitService, cwd, provider);
+  const issue = element
+    ? await provider.getIssue(element.id)
+    : await resolveActiveIssueViaBranch(gitService, cwd, provider);
   if (!issue) {
     void vscode.window.showErrorMessage(
       "Could not determine which issue this branch is for. Rename the branch to include the issue number (e.g. 'fix/53-description').",
@@ -1240,6 +1283,16 @@ async function createPrFromIssue(context: vscode.ExtensionContext): Promise<void
       `Could not resolve branches or commits: ${error instanceof Error ? error.message : String(error)}`,
     );
     return;
+  }
+
+  if (element && extractIssueNumberFromBranch(currentBranch) !== issue.number) {
+    const choice = await vscode.window.showWarningMessage(
+      `The current branch '${currentBranch}' does not reference issue #${issue.number}. Create the PR from it anyway?`,
+      "Continue",
+    );
+    if (choice !== "Continue") {
+      return;
+    }
   }
 
   const title = buildPrTitle(issue);
@@ -1458,6 +1511,103 @@ async function exportMilestoneContext(context: vscode.ExtensionContext): Promise
   void vscode.window.showInformationMessage(`Exported milestone context to ${relativePath}.`);
 }
 
+function readExtensionVersion(context: vscode.ExtensionContext): string {
+  const { version } = context.extension.packageJSON as { version?: unknown };
+  return typeof version === "string" ? version : "unknown";
+}
+
+/**
+ * "Run diagnostics" (#82): probes the remote detection, the stored token
+ * and (only when a token already exists, so no prompt is ever raised) the
+ * connection and its capabilities, then shows the report in the output
+ * channel and offers to copy it.
+ */
+async function runDiagnostics(context: vscode.ExtensionContext): Promise<void> {
+  const resolution = await resolveRepository();
+  const input: {
+    -readonly [K in keyof DiagnosticsInput]: DiagnosticsInput[K];
+  } = {
+    extensionVersion: readExtensionVersion(context),
+    vscodeVersion: vscode.version,
+    resolution,
+    tokenStored: false,
+  };
+
+  if (resolution.kind === "resolved") {
+    input.tokenProvider = resolution.providerKind;
+    const token = await context.secrets.get(secretKeyFor(resolution.providerKind));
+    input.tokenStored = Boolean(token);
+    if (token) {
+      try {
+        const config = vscode.workspace.getConfiguration("remoteProjectManager");
+        const { provider, currentUser } = await connectProvider(
+          resolution.providerKind,
+          resolution.repository,
+          token,
+          config.get<number>("cacheTtlSeconds", 180),
+          config.get<string>("gitlabHost", "") || undefined,
+        );
+        input.connection = {
+          ok: true,
+          username: currentUser.username,
+          capabilities: await provider.getCapabilities({ forceRefresh: true }),
+        };
+      } catch (error) {
+        input.connection = {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+  }
+
+  const report = formatDiagnosticsReport(input);
+  logger.info(`\n${report}`);
+  logger.show();
+  const choice = await vscode.window.showInformationMessage(
+    "Diagnostics written to the 'Remote Project Manager' output channel.",
+    "Copy report",
+  );
+  if (choice === "Copy report") {
+    await vscode.env.clipboard.writeText(report);
+  }
+}
+
+/** Tree action (#80): creates and switches to a branch for the clicked issue. */
+async function createBranchForTreeIssue(
+  context: vscode.ExtensionContext,
+  element: MyIssueSummary,
+): Promise<void> {
+  const connection = await getActiveConnection(context);
+  if (!connection) {
+    void vscode.window.showErrorMessage(
+      "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+    );
+    return;
+  }
+  const { provider, cwd } = connection;
+  const gitService = new SimpleGitService();
+  const config = vscode.workspace.getConfiguration("remoteProjectManager");
+  const pattern = config.get<string>("branchNamePattern", "") || undefined;
+  try {
+    const issue = await provider.getIssue(element.id);
+    const message = await requestCreateBranch(
+      issue,
+      cwd,
+      gitService,
+      new BranchManager(gitService),
+      pattern,
+    );
+    if (message) {
+      void vscode.window.showInformationMessage(message);
+    }
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      error instanceof Error ? error.message : `Could not create branch: ${String(error)}`,
+    );
+  }
+}
+
 /** API this extension exposes to other extensions (e.g. AI agents) via `extensions.getExtension(...).exports`. */
 export interface RemoteProjectManagerApi {
   /** The Markdown context block from the last "Copy Issue Context for AI" invocation, if any. */
@@ -1466,6 +1616,13 @@ export interface RemoteProjectManagerApi {
 
 export function activate(context: vscode.ExtensionContext): RemoteProjectManagerApi {
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
+  const statusBar = new IssueStatusBar();
+  logger.info("Remote Project Manager activated");
+  context.subscriptions.push(
+    statusBar,
+    new vscode.Disposable(() => logger.dispose()),
+    treeDataProvider.onDidSync(({ sync, folderPath }) => statusBar.update(sync, folderPath)),
+  );
   registerRepositorySync(context, treeDataProvider);
   // Opening a folder ("Open Folder", "Open Recent") restarts the extension
   // host, so activation is the sync point for the newly loaded project.
@@ -1486,6 +1643,9 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     vscode.commands.registerCommand("remoteProjectManager.newMilestone", () => {
       void openPanel(context, { kind: "newMilestone" });
     }),
+    vscode.commands.registerCommand("remoteProjectManager.runDiagnostics", () => {
+      void runDiagnostics(context);
+    }),
     vscode.commands.registerCommand("remoteProjectManager.refresh", () => {
       void openPanel(context, { kind: "refresh" });
     }),
@@ -1495,12 +1655,30 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     vscode.commands.registerCommand("remoteProjectManager.pickGitmoji", () => {
       void pickGitmojiCommand(context);
     }),
-    vscode.commands.registerCommand("remoteProjectManager.copyIssueContext", () => {
-      void copyIssueContext(context);
-    }),
-    vscode.commands.registerCommand("remoteProjectManager.createPrFromIssue", () => {
-      void createPrFromIssue(context);
-    }),
+    vscode.commands.registerCommand(
+      "remoteProjectManager.copyIssueContext",
+      (element?: MyIssueSummary) => {
+        void copyIssueContext(context, element);
+      },
+    ),
+    vscode.commands.registerCommand(
+      "remoteProjectManager.createPrFromIssue",
+      (element?: MyIssueSummary) => {
+        void createPrFromIssue(context, element);
+      },
+    ),
+    vscode.commands.registerCommand(
+      "remoteProjectManager.createBranchForIssue",
+      (element: MyIssueSummary) => {
+        void createBranchForTreeIssue(context, element);
+      },
+    ),
+    vscode.commands.registerCommand(
+      "remoteProjectManager.openIssueInBrowser",
+      (element: MyIssueSummary) => {
+        void vscode.env.openExternal(vscode.Uri.parse(element.url));
+      },
+    ),
     vscode.commands.registerCommand("remoteProjectManager.showGitGraph", () => {
       void showGitGraph();
     }),

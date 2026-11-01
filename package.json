@@ -52,11 +52,13 @@
       },
       {
         "command": "remoteProjectManager.copyIssueContext",
-        "title": "Remote Project Manager: Copy Issue Context for AI"
+        "title": "Remote Project Manager: Copy Issue Context for AI",
+        "icon": "$(copy)"
       },
       {
         "command": "remoteProjectManager.createPrFromIssue",
-        "title": "Remote Project Manager: Create PR from Issue"
+        "title": "Remote Project Manager: Create PR from Issue",
+        "icon": "$(git-pull-request)"
       },
       {
         "command": "remoteProjectManager.showGitGraph",
@@ -69,6 +71,20 @@
       {
         "command": "remoteProjectManager.exportMilestoneContext",
         "title": "Remote Project Manager: Export Milestone Context for AI Agents"
+      },
+      {
+        "command": "remoteProjectManager.createBranchForIssue",
+        "title": "Remote Project Manager: Create Branch for Issue",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "remoteProjectManager.openIssueInBrowser",
+        "title": "Remote Project Manager: Open Issue in Browser",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "remoteProjectManager.runDiagnostics",
+        "title": "Remote Project Manager: Run Diagnostics"
       }
     ],
     "viewsContainers": {
@@ -138,7 +154,83 @@
           "description": "Workspace-relative path 'Export Milestone Context for AI Agents' writes to. Only the extension-managed section (between HTML comment markers) is replaced on re-export; the rest of the file, if any, is left untouched."
         }
       }
-    }
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "remoteProjectManager.createBranchForIssue",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "inline@1"
+        },
+        {
+          "command": "remoteProjectManager.copyIssueContext",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "inline@2"
+        },
+        {
+          "command": "remoteProjectManager.createPrFromIssue",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "inline@3"
+        },
+        {
+          "command": "remoteProjectManager.openIssueInBrowser",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "inline@4"
+        },
+        {
+          "command": "remoteProjectManager.createBranchForIssue",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "1_git@1"
+        },
+        {
+          "command": "remoteProjectManager.createPrFromIssue",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "1_git@2"
+        },
+        {
+          "command": "remoteProjectManager.copyIssueContext",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "2_ai@1"
+        },
+        {
+          "command": "remoteProjectManager.openIssueInBrowser",
+          "when": "view == remoteProjectManager.sidebar && viewItem == issue",
+          "group": "3_open@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "remoteProjectManager.createBranchForIssue",
+          "when": "false"
+        },
+        {
+          "command": "remoteProjectManager.openIssueInBrowser",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "remoteProjectManager.composeCommit",
+        "key": "ctrl+alt+r c",
+        "mac": "cmd+alt+r c"
+      },
+      {
+        "command": "remoteProjectManager.pickGitmoji",
+        "key": "ctrl+alt+r g",
+        "mac": "cmd+alt+r g"
+      },
+      {
+        "command": "remoteProjectManager.newIssue",
+        "key": "ctrl+alt+r n",
+        "mac": "cmd+alt+r n"
+      },
+      {
+        "command": "remoteProjectManager.refresh",
+        "key": "ctrl+alt+r r",
+        "mac": "cmd+alt+r r"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p . && tsc -p tsconfig.webview.json",
