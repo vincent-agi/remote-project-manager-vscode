@@ -1,3 +1,5 @@
+import type { IComment } from "../core/models/comment.model";
+import type { SettingEntry } from "../core/settings/settings-schema";
 import type { IIssue, ProviderKind } from "../core/models/issue.model";
 import type { IMilestone } from "../core/models/milestone.model";
 import type {
@@ -17,6 +19,20 @@ export interface RepositoryOptionView {
   readonly repository: string;
 }
 
+/**
+ * Per-workspace UI preferences (saved filters, sort order, ...). Opaque to
+ * the host: the webview owns the shape and validates what it reads back.
+ */
+export type UiPrefsView = Readonly<Record<string, unknown>>;
+
+/** An issue template offered in the new-issue form. */
+export interface IssueTemplateView {
+  readonly name: string;
+  readonly body: string;
+  readonly title?: string;
+  readonly labels: readonly string[];
+}
+
 /** Messages the webview sends to the extension host. */
 export type InboundMessage =
   | { readonly type: "requestState"; readonly forceRefresh?: boolean }
@@ -25,7 +41,23 @@ export type InboundMessage =
   | { readonly type: "createIssue"; readonly input: CreateIssueInput }
   | { readonly type: "updateMilestone"; readonly id: string; readonly patch: UpdateMilestoneInput }
   | { readonly type: "createMilestone"; readonly input: CreateMilestoneInput }
-  | { readonly type: "createBranchForIssue"; readonly id: string };
+  | { readonly type: "createBranchForIssue"; readonly id: string }
+  | { readonly type: "saveUiPrefs"; readonly prefs: UiPrefsView }
+  | { readonly type: "reconnect" }
+  | { readonly type: "requestIssueTemplates" }
+  | { readonly type: "requestSettings" }
+  | { readonly type: "updateSetting"; readonly key: string; readonly value: unknown }
+  | {
+      readonly type: "previewBranchName";
+      readonly pattern: string;
+      readonly sample: {
+        readonly title: string;
+        readonly number: number;
+        readonly labels: readonly string[];
+      };
+    }
+  | { readonly type: "requestComments"; readonly issueId: string }
+  | { readonly type: "addComment"; readonly issueId: string; readonly body: string };
 
 /** Messages the extension host sends to the webview. */
 export type OutboundMessage =
@@ -37,10 +69,29 @@ export type OutboundMessage =
       readonly currentUser: IAuthenticatedUser;
       readonly availableLabels: readonly string[];
       readonly availableAssignableUsers: readonly string[];
+      /** Label name to `rrggbb` colour, for the labels the provider colours. */
+      readonly labelColors: Readonly<Record<string, string>>;
+      /** Epoch ms the issue list was last fetched from the remote, when known. */
+      readonly dataFetchedAt?: number;
     }
-  | { readonly type: "repositoryOptions"; readonly options: readonly RepositoryOptionView[] }
+  | { readonly type: "uiPrefs"; readonly prefs: UiPrefsView }
+  | { readonly type: "settings"; readonly entries: readonly SettingEntry[] }
+  | {
+      readonly type: "branchNamePreview";
+      readonly pattern: string;
+      readonly example: string;
+      readonly warnings: readonly string[];
+    }
+  | { readonly type: "comments"; readonly issueId: string; readonly comments: readonly IComment[] }
+  | { readonly type: "issueTemplates"; readonly templates: readonly IssueTemplateView[] }
+  | {
+      readonly type: "repositoryOptions";
+      readonly options: readonly RepositoryOptionView[];
+      /** Set when a repository is already chosen: the webview shows a switcher instead of the picker. */
+      readonly selectedId?: string;
+    }
   | { readonly type: "selectIssue"; readonly id: string }
   | { readonly type: "openNewIssueForm" }
   | { readonly type: "openNewMilestoneForm" }
   | { readonly type: "actionSuccess"; readonly message: string }
-  | { readonly type: "error"; readonly message: string };
+  | { readonly type: "error"; readonly message: string; readonly authError?: boolean };

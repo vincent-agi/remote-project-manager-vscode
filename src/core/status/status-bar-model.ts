@@ -1,4 +1,5 @@
 import { extractIssueNumberFromBranch } from "../git/branch-issue-ref";
+import { identityTranslate, type Translate } from "../i18n/translate";
 
 /** The fields of an issue the status bar needs. */
 export interface StatusBarIssue {
@@ -46,7 +47,11 @@ function truncate(title: string): string {
  * (via {@link extractIssueNumberFromBranch}), or the connection problem
  * that prevents knowing it. Hidden when there is no repository to talk to.
  */
-export function buildStatusBarModel(branch: string | null, sync: SyncState): StatusBarModel {
+export function buildStatusBarModel(
+  branch: string | null,
+  sync: SyncState,
+  t: Translate = identityTranslate,
+): StatusBarModel {
   switch (sync.kind) {
     case "unavailable":
       return HIDDEN;
@@ -55,14 +60,14 @@ export function buildStatusBarModel(branch: string | null, sync: SyncState): Sta
         ...HIDDEN,
         visible: true,
         text: "$(sync~spin) Remote Project Manager",
-        tooltip: "Syncing issues…",
+        tooltip: t("Syncing issues…"),
       };
     case "auth-error":
       return {
         ...HIDDEN,
         visible: true,
-        text: "$(error) Remote Project Manager: sign in",
-        tooltip: "Authentication failed. Click to open the panel and sign in again.",
+        text: t("$(error) Remote Project Manager: sign in"),
+        tooltip: t("Authentication failed. Click to open the panel and sign in again."),
         severity: "error",
       };
     case "ok": {
@@ -71,10 +76,10 @@ export function buildStatusBarModel(branch: string | null, sync: SyncState): Sta
         return {
           ...HIDDEN,
           visible: true,
-          text: "$(circle-slash) No linked issue",
+          text: t("$(circle-slash) No linked issue"),
           tooltip: branch
-            ? `Branch "${branch}" does not reference an issue. Click to open the panel.`
-            : "Click to open the panel.",
+            ? t('Branch "{0}" does not reference an issue. Click to open the panel.', branch)
+            : t("Click to open the panel."),
           severity: "warning",
         };
       }
@@ -84,14 +89,14 @@ export function buildStatusBarModel(branch: string | null, sync: SyncState): Sta
           ...HIDDEN,
           visible: true,
           text: `$(issues) #${number}`,
-          tooltip: `Issue #${number} was not found on the remote. Click to open the panel.`,
+          tooltip: t("Issue #{0} was not found on the remote. Click to open the panel.", number),
           severity: "warning",
         };
       }
       return {
         visible: true,
         text: `$(issues) #${issue.number} ${truncate(issue.title)}`,
-        tooltip: `#${issue.number} ${issue.title}\nBranch: ${branch}\nClick to open the issue.`,
+        tooltip: `#${issue.number} ${issue.title}\n${t("Branch: {0}", branch ?? "")}\n${t("Click to open the issue.")}`,
         severity: "normal",
         command: "remoteProjectManager.openIssueFromTree",
         commandArguments: [issue.id],

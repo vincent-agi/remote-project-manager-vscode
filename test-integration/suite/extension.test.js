@@ -112,6 +112,13 @@ describe("Remote Project Manager — integration", () => {
       "remoteProjectManager.createBranchForIssue",
       "remoteProjectManager.openIssueInBrowser",
       "remoteProjectManager.runDiagnostics",
+      "remoteProjectManager.installCommitMsgHook",
+      "remoteProjectManager.uninstallCommitMsgHook",
+      "remoteProjectManager.createIssueFromSelection",
+      "remoteProjectManager.createIssueFromTodo",
+      "remoteProjectManager.openIssueByNumber",
+      "remoteProjectManager.openWalkthrough",
+      "remoteProjectManager.selectRepository",
     ];
     for (const command of expected) {
       assert.ok(commands.includes(command), `command not registered: ${command}`);

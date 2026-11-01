@@ -1,5 +1,7 @@
-import simpleGit from "simple-git";
+import * as path from "node:path";
+import { simpleGit } from "simple-git";
 import type {
+  GitGraphCommit,
   GitLogEntry,
   GitStatusSummary,
   IGitService,
@@ -91,15 +93,76 @@ export class SimpleGitService implements IGitService {
     }
   }
 
+  /** Absolute path of the hooks directory, honouring `core.hooksPath` and worktrees. */
+  async getHooksPath(cwd: string): Promise<string> {
+    const raw = await simpleGit(cwd).raw(["rev-parse", "--git-path", "hooks"]);
+    const hooksPath = raw.trim();
+    return path.isAbsolute(hooksPath) ? hooksPath : path.join(cwd, hooksPath);
+  }
+
+  async getStagedFiles(cwd: string): Promise<string[]> {
+    const raw = await simpleGit(cwd).raw(["diff", "--cached", "--name-only"]);
+    return raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+  }
+
   async getCurrentBranch(cwd: string): Promise<string> {
     const branch = await simpleGit(cwd).raw(["rev-parse", "--abbrev-ref", "HEAD"]);
     return branch.trim();
   }
 
-  async log(cwd: string, range?: string): Promise<GitLogEntry[]> {
+  async getGraphLog(cwd: string, maxCount: number): Promise<GitGraphCommit[]> {
+    const raw = await simpleGit(cwd).raw([
+      "log",
+      "--all",
+      "--topo-order",
+      `--max-count=${maxCount}`,
+      `--pretty=format:%H${LOG_FIELD_SEP}%P${LOG_FIELD_SEP}%an${LOG_FIELD_SEP}%aI${LOG_FIELD_SEP}%D${LOG_FIELD_SEP}%B${LOG_RECORD_SEP}`,
+    ]);
+    return raw
+      .split(LOG_RECORD_SEP)
+      .map((record) => record.replace(/^\n/, ""))
+      .filter((record) => record.trim().length > 0)
+      .map((record) => {
+        const [hash, parents, author, date, refs, ...messageParts] = record.split(LOG_FIELD_SEP);
+        return {
+          hash,
+          parents: parents.split(" ").filter(Boolean),
+          author,
+          date,
+          refs: refs
+            .split(",")
+            .map((ref) => ref.trim().replace(/^HEAD -> /, ""))
+            .filter((ref) => ref !== "" && ref !== "HEAD"),
+          message: messageParts.join(LOG_FIELD_SEP).replace(/\n+$/, ""),
+        };
+      });
+  }
+
+  async getCommitPatch(cwd: string, hash: string): Promise<string> {
+    return simpleGit(cwd).raw(["show", "--stat", "--patch", hash]);
+  }
+
+  async getHeadSha(cwd: string): Promise<string> {
+    return (await simpleGit(cwd).raw(["rev-parse", "HEAD"])).trim();
+  }
+
+  async getRepoRoot(cwd: string): Promise<string> {
+    return (await simpleGit(cwd).raw(["rev-parse", "--show-toplevel"])).trim();
+  }
+
+  async getLastReflogSubject(cwd: string): Promise<string> {
+    const raw = await simpleGit(cwd).raw(["reflog", "-1", "--format=%gs"]);
+    return raw.trim();
+  }
+
+  async log(cwd: string, range?: string, maxCount?: number): Promise<GitLogEntry[]> {
     const raw = await simpleGit(cwd).raw([
       "log",
       `--pretty=format:%H${LOG_FIELD_SEP}%B${LOG_RECORD_SEP}`,
+      ...(maxCount ? [`--max-count=${maxCount}`] : []),
       ...(range ? [range] : []),
     ]);
     return raw

@@ -1,3 +1,4 @@
+import type { IComment } from "../../core/models/comment.model";
 import type { IIssue, IssueState } from "../../core/models/issue.model";
 import type { IMilestone, MilestoneState } from "../../core/models/milestone.model";
 
@@ -91,5 +92,24 @@ export function mapGithubMilestoneToDomain(raw: RawGithubMilestone): IMilestone 
     provider: "github",
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
+  };
+}
+
+/** Minimal shape of a GitHub REST API issue comment, limited to fields we map. */
+export interface RawGithubComment {
+  readonly id: number;
+  readonly user: { login: string } | null;
+  readonly body?: string | null;
+  readonly created_at: string;
+  readonly html_url: string;
+}
+
+export function mapGithubCommentToDomain(raw: RawGithubComment): IComment {
+  return {
+    id: String(raw.id),
+    author: raw.user?.login ?? "ghost",
+    body: raw.body ?? "",
+    createdAt: raw.created_at,
+    url: raw.html_url,
   };
 }

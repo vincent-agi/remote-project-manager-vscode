@@ -51,6 +51,9 @@ function makeProvider(capabilities: ProviderCapabilities): IProjectProvider {
     updateMilestone: vi.fn().mockResolvedValue({ ...milestone, state: "closed" }),
     listLabels: vi.fn().mockResolvedValue(["bug"]),
     listAssignableUsers: vi.fn().mockResolvedValue(["octocat"]),
+    listLabelColors: vi.fn().mockResolvedValue({}),
+    listComments: vi.fn().mockResolvedValue([]),
+    addComment: vi.fn(),
   };
 }
 
@@ -84,6 +87,7 @@ describe("PanelController.handleMessage 'requestState'", () => {
       currentUser: { username: "octocat" },
       availableLabels: ["bug"],
       availableAssignableUsers: ["octocat"],
+      labelColors: {},
     });
   });
 });
@@ -481,6 +485,317 @@ describe("PanelController error handling", () => {
     await controller.handleMessage({ type: "requestState" });
 
     expect(onError).toHaveBeenCalledWith(authError);
-    expect(postMessage).toHaveBeenCalledWith({ type: "error", message: "401 Unauthorized" });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "error",
+      message: "401 Unauthorized",
+      authError: true,
+    });
+  });
+});
+
+describe("PanelController UI preferences", () => {
+  it("posts the stored preferences before the state on requestState", async () => {
+    const posted: { type: string }[] = [];
+    const store = { get: vi.fn().mockReturnValue({ sort: "updated" }), set: vi.fn() };
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      store,
+    );
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.map((message) => message.type)).toEqual(["uiPrefs", "state"]);
+    expect(posted[0]).toEqual({ type: "uiPrefs", prefs: { sort: "updated" } });
+  });
+
+  it("persists saved preferences without refetching", async () => {
+    const provider = makeProvider(fullAccess);
+    const store = { get: vi.fn().mockReturnValue({}), set: vi.fn() };
+    const controller = new PanelController(
+      provider,
+      vi.fn(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      store,
+    );
+
+    await controller.handleMessage({ type: "saveUiPrefs", prefs: { sort: "number" } });
+
+    expect(store.set).toHaveBeenCalledWith({ sort: "number" });
+    expect(provider.listIssues).not.toHaveBeenCalled();
+  });
+
+  it("ignores saveUiPrefs and skips uiPrefs when no store is wired", async () => {
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(makeProvider(fullAccess), (message) =>
+      posted.push(message),
+    );
+
+    await controller.handleMessage({ type: "saveUiPrefs", prefs: {} });
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.map((message) => message.type)).toEqual(["state"]);
+  });
+});
+
+describe("PanelController connection feedback", () => {
+  it("flags authentication failures so the webview can offer to reconnect", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.getCapabilities as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error("Bad credentials"), { status: 401 }),
+    );
+    const posted: { type: string; authError?: boolean }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.at(-1)).toMatchObject({ type: "error", authError: true });
+  });
+
+  it("does not flag other errors", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listIssues as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
+    const posted: { type: string; authError?: boolean }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.at(-1)?.authError).toBeUndefined();
+  });
+
+  it("includes the issue list's fetch time when the provider reports one", async () => {
+    const provider = Object.assign(makeProvider(fullAccess), {
+      getIssuesFetchedAt: () => 1234,
+    });
+    const posted: { type: string; dataFetchedAt?: number }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.find((message) => message.type === "state")?.dataFetchedAt).toBe(1234);
+  });
+
+  it("forwards a reconnect request", async () => {
+    const onReconnect = vi.fn();
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      vi.fn(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onReconnect,
+    );
+
+    await controller.handleMessage({ type: "reconnect" });
+
+    expect(onReconnect).toHaveBeenCalledOnce();
+  });
+});
+
+describe("PanelController issue templates", () => {
+  it("answers requestIssueTemplates with the loaded templates", async () => {
+    const posted: { type: string; templates?: unknown }[] = [];
+    const templates = [{ name: "Bug", body: "b", labels: ["bug"] }];
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Promise.resolve(templates),
+    );
+
+    await controller.handleMessage({ type: "requestIssueTemplates" });
+
+    expect(posted).toEqual([{ type: "issueTemplates", templates }]);
+  });
+
+  it("falls back to an empty list when loading fails, and ignores the request without a loader", async () => {
+    const posted: { type: string; templates?: unknown }[] = [];
+    const failing = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Promise.reject(new Error("fs")),
+    );
+    await failing.handleMessage({ type: "requestIssueTemplates" });
+    expect(posted).toEqual([{ type: "issueTemplates", templates: [] }]);
+
+    const none = new PanelController(makeProvider(fullAccess), (message) => posted.push(message));
+    await none.handleMessage({ type: "requestIssueTemplates" });
+    expect(posted).toHaveLength(1);
+  });
+});
+
+describe("PanelController comments", () => {
+  const comment = { id: "1", author: "octocat", body: "hi", createdAt: "2026-01-01T00:00:00Z" };
+
+  it("answers requestComments with the provider's comments", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listComments as ReturnType<typeof vi.fn>).mockResolvedValue([comment]);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestComments", issueId: issue.id });
+
+    expect(provider.listComments).toHaveBeenCalledWith(issue.id);
+    expect(posted).toEqual([{ type: "comments", issueId: issue.id, comments: [comment] }]);
+  });
+
+  it("adds a trimmed comment, then re-sends the comments and the state", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listComments as ReturnType<typeof vi.fn>).mockResolvedValue([comment]);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "addComment", issueId: issue.id, body: "  hello \n" });
+
+    expect(provider.addComment).toHaveBeenCalledWith(issue.id, "hello");
+    expect(posted.map((message) => message.type)).toEqual(["actionSuccess", "comments", "state"]);
+  });
+
+  it("refuses an empty comment without calling the provider", async () => {
+    const provider = makeProvider(fullAccess);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "addComment", issueId: issue.id, body: "   " });
+
+    expect(provider.addComment).not.toHaveBeenCalled();
+    expect(posted).toEqual([{ type: "error", message: "A comment cannot be empty." }]);
+  });
+
+  it("refuses to comment without write access", async () => {
+    const provider = makeProvider(readOnly);
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "addComment", issueId: issue.id, body: "hi" });
+
+    expect(provider.addComment).not.toHaveBeenCalled();
+    expect(posted.at(-1)).toMatchObject({ type: "error" });
+  });
+});
+
+describe("PanelController label colours", () => {
+  it("includes label colours in the state", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listLabelColors as ReturnType<typeof vi.fn>).mockResolvedValue({ bug: "d73a4a" });
+    const posted: { type: string; labelColors?: unknown }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.find((message) => message.type === "state")?.labelColors).toEqual({
+      bug: "d73a4a",
+    });
+  });
+
+  it("still sends the state when colours cannot be loaded", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listLabelColors as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("nope"));
+    const posted: { type: string; labelColors?: unknown }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.find((message) => message.type === "state")?.labelColors).toEqual({});
+  });
+});
+
+describe("PanelController settings", () => {
+  const entries = [
+    {
+      key: "cacheTtlSeconds",
+      group: "connection" as const,
+      groupLabel: "Connection",
+      label: "Cache",
+      hint: "",
+      kind: { type: "number" as const, min: 0 },
+      scope: "user" as const,
+      value: 60,
+      defaultValue: 180,
+      isDefault: false,
+    },
+  ];
+
+  function makeBridge(writeResult: string | null = null) {
+    return {
+      read: vi.fn().mockReturnValue(entries),
+      write: vi.fn().mockResolvedValue(writeResult),
+      previewBranchName: vi.fn().mockReturnValue({ example: "fix/1-x", warnings: ["w"] }),
+    };
+  }
+
+  function makeController(bridge: ReturnType<typeof makeBridge> | undefined) {
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      bridge,
+    );
+    return { controller, posted };
+  }
+
+  it("sends the settings on request", async () => {
+    const { controller, posted } = makeController(makeBridge());
+    await controller.handleMessage({ type: "requestSettings" });
+    expect(posted).toEqual([{ type: "settings", entries }]);
+  });
+
+  it("writes a setting, confirms and re-sends the settings", async () => {
+    const bridge = makeBridge();
+    const { controller, posted } = makeController(bridge);
+    await controller.handleMessage({ type: "updateSetting", key: "cacheTtlSeconds", value: 30 });
+    expect(bridge.write).toHaveBeenCalledWith("cacheTtlSeconds", 30);
+    expect(posted.map((message) => message.type)).toEqual(["actionSuccess", "settings"]);
+  });
+
+  it("reports a rejected write without confirming", async () => {
+    const { controller, posted } = makeController(makeBridge("Expected a number."));
+    await controller.handleMessage({ type: "updateSetting", key: "cacheTtlSeconds", value: "x" });
+    expect(posted).toEqual([{ type: "error", message: "Expected a number." }]);
+  });
+
+  it("answers a branch-name preview request", async () => {
+    const bridge = makeBridge();
+    const { controller, posted } = makeController(bridge);
+    const sample = { title: "T", number: 1, labels: [] };
+    await controller.handleMessage({ type: "previewBranchName", pattern: "${type}", sample });
+    expect(bridge.previewBranchName).toHaveBeenCalledWith("${type}", sample);
+    expect(posted).toEqual([
+      { type: "branchNamePreview", pattern: "${type}", example: "fix/1-x", warnings: ["w"] },
+    ]);
+  });
+
+  it("ignores settings messages when no bridge is wired", async () => {
+    const { controller, posted } = makeController(undefined);
+    await controller.handleMessage({ type: "requestSettings" });
+    await controller.handleMessage({ type: "updateSetting", key: "x", value: 1 });
+    expect(posted).toEqual([]);
   });
 });

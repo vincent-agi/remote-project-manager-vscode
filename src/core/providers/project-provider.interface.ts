@@ -1,3 +1,4 @@
+import type { IComment } from "../models/comment.model";
 import type { IIssue, IssueState } from "../models/issue.model";
 import type { IMilestone, MilestoneState } from "../models/milestone.model";
 
@@ -78,6 +79,10 @@ export interface IProjectProvider {
   createIssue(input: CreateIssueInput): Promise<IIssue>;
   updateIssue(id: string, patch: UpdateIssueInput): Promise<IIssue>;
 
+  /** Human comments on an issue, oldest first (system/bot activity notes excluded). */
+  listComments(issueId: string): Promise<readonly IComment[]>;
+  addComment(issueId: string, body: string): Promise<IComment>;
+
   listMilestones(options?: FetchOptions): Promise<readonly IMilestone[]>;
   getMilestone(id: string): Promise<IMilestone>;
   createMilestone(input: CreateMilestoneInput): Promise<IMilestone>;
@@ -85,6 +90,9 @@ export interface IProjectProvider {
 
   /** Label names available on this repository, for a labels picker. */
   listLabels(options?: FetchOptions): Promise<readonly string[]>;
+
+  /** Label name to hex colour (`rrggbb`, no `#`), for labels the provider colours. */
+  listLabelColors(options?: FetchOptions): Promise<Readonly<Record<string, string>>>;
 
   /** Usernames that can be assigned to an issue on this repository. */
   listAssignableUsers(options?: FetchOptions): Promise<readonly string[]>;
@@ -104,4 +112,18 @@ export function assertCanWrite(
   if (!capabilities[permission]) {
     throw new Error(`Operation requires '${permission}', but the active account does not have it.`);
   }
+}
+
+/**
+ * Optional capability of a caching provider: when the issue list it hands
+ * out was last fetched from the remote (epoch ms), so the UI can say how
+ * stale cached data is.
+ */
+export interface IFetchTimestamps {
+  getIssuesFetchedAt(): number | undefined;
+}
+
+/** True when `provider` can report how old its cached issue list is. */
+export function hasFetchTimestamps(provider: object): provider is IFetchTimestamps {
+  return typeof (provider as Partial<IFetchTimestamps>).getIssuesFetchedAt === "function";
 }

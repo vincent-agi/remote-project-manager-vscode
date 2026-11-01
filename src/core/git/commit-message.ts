@@ -74,11 +74,11 @@ export interface CommitValidationResult {
 export const GITMOJI_PATTERN_SOURCE =
   "\\p{Extended_Pictographic}\\p{Emoji_Modifier}?\\uFE0F?(?:\\u200D\\p{Extended_Pictographic}\\p{Emoji_Modifier}?\\uFE0F?)*";
 
+/** Source of the subject-line pattern, shared with the generated `commit-msg` hook. */
+export const COMMIT_SUBJECT_PATTERN_SOURCE = `^[a-z]+(\\([\\w./-]+\\))?: (:[a-z0-9_+-]+:|${GITMOJI_PATTERN_SOURCE}) .+$`;
+
 /** Matches `<type>(<scope>): <gitmoji> <description>`, with `(<scope>)` optional. */
-const COMMIT_SUBJECT_PATTERN = new RegExp(
-  `^[a-z]+(\\([\\w./-]+\\))?: (:[a-z0-9_+-]+:|${GITMOJI_PATTERN_SOURCE}) .+$`,
-  "u",
-);
+const COMMIT_SUBJECT_PATTERN = new RegExp(COMMIT_SUBJECT_PATTERN_SOURCE, "u");
 
 /**
  * Validates a commit message's subject line (its first line) against the

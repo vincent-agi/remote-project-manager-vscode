@@ -7,6 +7,8 @@ function makeClient(overrides: Partial<GithubClient> = {}): GithubClient {
       listForRepo: vi.fn().mockResolvedValue({ data: [] }),
       get: vi.fn(),
       create: vi.fn(),
+      listComments: vi.fn().mockResolvedValue({ data: [] }),
+      createComment: vi.fn(),
       update: vi.fn(),
       listMilestones: vi.fn().mockResolvedValue({ data: [] }),
       createMilestone: vi.fn(),
@@ -359,5 +361,104 @@ describe("GithubProvider.getCapabilities", () => {
 
     expect(capabilities.canWriteIssues).toBe(true);
     expect(capabilities.canWriteMilestones).toBe(false);
+  });
+});
+
+describe("GithubProvider comments", () => {
+  const rawComment = {
+    id: 9,
+    user: { login: "octocat" },
+    body: "hello",
+    created_at: "2026-02-01T00:00:00Z",
+    html_url: "https://github.com/acme/widgets/issues/42#issuecomment-9",
+  };
+
+  it("lists comments for the issue number encoded in the id and maps them", async () => {
+    const listComments = vi
+      .fn()
+      .mockResolvedValue({ data: [rawComment, { ...rawComment, id: 10, user: null, body: null }] });
+    const client = makeClient();
+    client.issues.listComments = listComments;
+    const provider = new GithubProvider(client, "acme", "widgets");
+
+    const comments = await provider.listComments("acme/widgets#42");
+
+    expect(listComments).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      issue_number: 42,
+      per_page: 100,
+      page: 1,
+    });
+    expect(comments).toEqual([
+      {
+        id: "9",
+        author: "octocat",
+        body: "hello",
+        createdAt: "2026-02-01T00:00:00Z",
+        url: rawComment.html_url,
+      },
+      {
+        id: "10",
+        author: "ghost",
+        body: "",
+        createdAt: "2026-02-01T00:00:00Z",
+        url: rawComment.html_url,
+      },
+    ]);
+  });
+
+  it("paginates comment lists past 100 items", async () => {
+    const page1 = Array.from({ length: 100 }, (_, index) => ({ ...rawComment, id: index }));
+    const listComments = vi
+      .fn()
+      .mockResolvedValueOnce({ data: page1 })
+      .mockResolvedValueOnce({ data: [{ ...rawComment, id: 500 }] });
+    const client = makeClient();
+    client.issues.listComments = listComments;
+
+    const comments = await new GithubProvider(client, "acme", "widgets").listComments(
+      "acme/widgets#42",
+    );
+
+    expect(comments).toHaveLength(101);
+    expect(listComments).toHaveBeenCalledTimes(2);
+  });
+
+  it("posts a comment and maps the result", async () => {
+    const createComment = vi.fn().mockResolvedValue({ data: rawComment });
+    const client = makeClient();
+    client.issues.createComment = createComment;
+
+    const comment = await new GithubProvider(client, "acme", "widgets").addComment(
+      "acme/widgets#42",
+      "hello",
+    );
+
+    expect(createComment).toHaveBeenCalledWith({
+      owner: "acme",
+      repo: "widgets",
+      issue_number: 42,
+      body: "hello",
+    });
+    expect(comment.id).toBe("9");
+  });
+
+  it("rejects a malformed issue id", async () => {
+    await expect(
+      new GithubProvider(makeClient(), "acme", "widgets").listComments("nope"),
+    ).rejects.toThrow(/Not a valid GitHub issue id/);
+  });
+});
+
+describe("GithubProvider.listLabelColors", () => {
+  it("maps label names to their colours, skipping labels without one", async () => {
+    const client = makeClient();
+    client.issues.listLabelsForRepo = vi.fn().mockResolvedValue({
+      data: [{ name: "bug", color: "d73a4a" }, { name: "plain" }],
+    });
+    expect(await new GithubProvider(client, "acme", "widgets").listLabelColors()).toEqual({
+      bug: "d73a4a",
+    });
   });
 });

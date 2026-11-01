@@ -21,15 +21,37 @@ export interface FolderRemote {
   readonly remoteUrl: string | null;
 }
 
-function mapHostToProvider(host: string, gitlabHost?: string): ProviderKind | null {
+/**
+ * Strips the scheme, any path and the port from a configured host
+ * (`https://git.example.com:3000/` -> `git.example.com`), so it can be
+ * compared with the hostname of a remote URL.
+ */
+export function normalizeHostName(host: string | undefined): string | undefined {
+  if (!host) {
+    return undefined;
+  }
+  const withoutScheme = host.trim().replace(/^[a-z]+:\/\//i, "");
+  const hostname = withoutScheme.split("/")[0].replace(/:\d+$/, "").toLowerCase();
+  return hostname || undefined;
+}
+
+function mapHostToProvider(
+  host: string,
+  gitlabHost?: string,
+  giteaHost?: string,
+): ProviderKind | null {
+  const lowerHost = host.toLowerCase();
   if (host === "github.com") {
     return "github";
   }
   if (host === "gitlab.com") {
     return "gitlab";
   }
-  if (gitlabHost && host === gitlabHost) {
+  if (normalizeHostName(gitlabHost) === lowerHost) {
     return "gitlab";
+  }
+  if (normalizeHostName(giteaHost) === lowerHost) {
+    return "gitea";
   }
   return null;
 }
@@ -53,7 +75,11 @@ function parsePath(pathname: string): { owner: string; repo: string } | null {
  * @returns The parsed remote, or null if the URL is malformed or points
  * at an unrecognized host.
  */
-export function parseGitRemoteUrl(rawUrl: string, gitlabHost?: string): ParsedRemote | null {
+export function parseGitRemoteUrl(
+  rawUrl: string,
+  gitlabHost?: string,
+  giteaHost?: string,
+): ParsedRemote | null {
   const url = rawUrl.trim().replace(/\.git$/, "");
 
   if (url.includes("://")) {
@@ -64,7 +90,7 @@ export function parseGitRemoteUrl(rawUrl: string, gitlabHost?: string): ParsedRe
       return null;
     }
     const path = parsePath(parsed.pathname);
-    const provider = path && mapHostToProvider(parsed.hostname, gitlabHost);
+    const provider = path && mapHostToProvider(parsed.hostname, gitlabHost, giteaHost);
     return provider && path ? { provider, repository: `${path.owner}/${path.repo}` } : null;
   }
 
@@ -74,7 +100,7 @@ export function parseGitRemoteUrl(rawUrl: string, gitlabHost?: string): ParsedRe
   }
   const [, host, path] = scpMatch;
   const parsedPath = parsePath(path);
-  const provider = parsedPath && mapHostToProvider(host, gitlabHost);
+  const provider = parsedPath && mapHostToProvider(host, gitlabHost, giteaHost);
   return provider && parsedPath
     ? { provider, repository: `${parsedPath.owner}/${parsedPath.repo}` }
     : null;
@@ -89,13 +115,14 @@ export function parseGitRemoteUrl(rawUrl: string, gitlabHost?: string): ParsedRe
 export function resolveRepositoryCandidates(
   folders: readonly FolderRemote[],
   gitlabHost?: string,
+  giteaHost?: string,
 ): RepositoryCandidate[] {
   const candidates: RepositoryCandidate[] = [];
   for (const folder of folders) {
     if (!folder.remoteUrl) {
       continue;
     }
-    const parsed = parseGitRemoteUrl(folder.remoteUrl, gitlabHost);
+    const parsed = parseGitRemoteUrl(folder.remoteUrl, gitlabHost, giteaHost);
     if (!parsed) {
       continue;
     }
@@ -116,6 +143,11 @@ export type RepositoryResolution =
       readonly providerKind: ProviderKind;
       readonly repository: string;
       readonly folderPath?: string;
+      /**
+       * Every workspace repository, set only when there are several: the
+       * resolved one was picked among them (by the user's remembered choice).
+       */
+      readonly alternatives?: RepositoryCandidate[];
     }
   | { readonly kind: "candidates"; readonly candidates: RepositoryCandidate[] }
   | { readonly kind: "none" };
@@ -134,6 +166,8 @@ export function chooseRepository(
     readonly provider: ProviderKind;
     readonly repository: string;
     readonly fallbackFolderPath?: string;
+    /** Folder of the repository the user picked before; honoured while it is still a candidate. */
+    readonly preferredFolderPath?: string;
   },
 ): RepositoryResolution {
   if (candidates.length === 1) {
@@ -146,6 +180,18 @@ export function chooseRepository(
     };
   }
   if (candidates.length > 1) {
+    const preferred = candidates.find(
+      (candidate) => candidate.folderPath === settings.preferredFolderPath,
+    );
+    if (preferred) {
+      return {
+        kind: "resolved",
+        providerKind: preferred.provider,
+        repository: preferred.repository,
+        folderPath: preferred.folderPath,
+        alternatives: [...candidates],
+      };
+    }
     return { kind: "candidates", candidates: [...candidates] };
   }
   if (settings.repository.includes("/")) {

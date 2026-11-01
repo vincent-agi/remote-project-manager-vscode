@@ -35,6 +35,34 @@ describe("chooseRepository", () => {
     expect(result.kind).toBe("candidates");
   });
 
+  it("honours the remembered choice among several folders, keeping the alternatives", () => {
+    const a = candidate("a/a");
+    const b = candidate("b/b");
+    expect(chooseRepository([a, b], { ...settings, preferredFolderPath: b.folderPath })).toEqual({
+      kind: "resolved",
+      providerKind: "github",
+      repository: "b/b",
+      folderPath: b.folderPath,
+      alternatives: [a, b],
+    });
+  });
+
+  it("ignores a remembered choice that is no longer a candidate", () => {
+    const result = chooseRepository([candidate("a/a"), candidate("b/b")], {
+      ...settings,
+      preferredFolderPath: "/gone",
+    });
+    expect(result.kind).toBe("candidates");
+  });
+
+  it("does not add alternatives for a single repository", () => {
+    const result = chooseRepository([candidate("a/a")], {
+      ...settings,
+      preferredFolderPath: "/ws/a/a",
+    });
+    expect(result).not.toHaveProperty("alternatives");
+  });
+
   it("falls back to the setting when nothing is detected", () => {
     expect(chooseRepository([], settings)).toEqual({
       kind: "resolved",
@@ -197,6 +225,59 @@ describe("resolveRepositoryCandidates", () => {
         provider: "gitlab",
         repository: "acme/internal",
       },
+    ]);
+  });
+});
+
+describe("Gitea remotes", () => {
+  it("recognizes the configured Gitea host over https and ssh", () => {
+    expect(
+      parseGitRemoteUrl("https://git.example.com/acme/widgets.git", undefined, "git.example.com"),
+    ).toEqual({
+      provider: "gitea",
+      repository: "acme/widgets",
+    });
+    expect(
+      parseGitRemoteUrl("git@git.example.com:acme/widgets.git", undefined, "git.example.com"),
+    ).toEqual({
+      provider: "gitea",
+      repository: "acme/widgets",
+    });
+  });
+
+  it("ignores scheme, port and case in the configured host", () => {
+    for (const host of [
+      "https://Git.Example.com:3000/",
+      "git.example.com:3000",
+      "GIT.example.com",
+    ]) {
+      expect(parseGitRemoteUrl("https://git.example.com/a/b", undefined, host)?.provider).toBe(
+        "gitea",
+      );
+    }
+  });
+
+  it("does not recognize an unconfigured host", () => {
+    expect(parseGitRemoteUrl("https://git.example.com/a/b")).toBeNull();
+    expect(
+      parseGitRemoteUrl("https://other.example.com/a/b", undefined, "git.example.com"),
+    ).toBeNull();
+  });
+
+  it("keeps GitHub, GitLab and Gitea apart in one workspace", () => {
+    const candidates = resolveRepositoryCandidates(
+      [
+        { folderPath: "/a", folderName: "a", remoteUrl: "git@github.com:o/a.git" },
+        { folderPath: "/b", folderName: "b", remoteUrl: "https://gitlab.example.org/o/b" },
+        { folderPath: "/c", folderName: "c", remoteUrl: "https://git.example.com/o/c" },
+      ],
+      "gitlab.example.org",
+      "git.example.com",
+    );
+    expect(candidates.map((candidate) => candidate.provider)).toEqual([
+      "github",
+      "gitlab",
+      "gitea",
     ]);
   });
 });

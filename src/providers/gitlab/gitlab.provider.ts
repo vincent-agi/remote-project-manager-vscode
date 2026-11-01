@@ -1,3 +1,4 @@
+import type { IComment } from "../../core/models/comment.model";
 import type { IIssue } from "../../core/models/issue.model";
 import type { IMilestone } from "../../core/models/milestone.model";
 import type {
@@ -14,8 +15,10 @@ import {
   mapDomainIssueStateToGitlab,
   mapGitlabIssueToDomain,
   mapGitlabMilestoneToDomain,
+  mapGitlabNoteToDomain,
   type RawGitlabIssue,
   type RawGitlabMilestone,
+  type RawGitlabNote,
 } from "./gitlab.mappers";
 
 const DEVELOPER_ACCESS_LEVEL = 30;
@@ -40,6 +43,10 @@ export interface GitlabClient {
       options: Record<string, unknown>,
     ): Promise<RawGitlabIssue>;
   };
+  IssueNotes: {
+    all(projectId: string, issueIid: number): Promise<readonly RawGitlabNote[]>;
+    create(projectId: string, issueIid: number, body: string): Promise<RawGitlabNote>;
+  };
   ProjectMilestones: {
     all(projectId: string): Promise<readonly RawGitlabMilestone[]>;
     show(projectId: string, milestoneId: number): Promise<RawGitlabMilestone>;
@@ -55,7 +62,7 @@ export interface GitlabClient {
     ): Promise<RawGitlabMilestone>;
   };
   ProjectLabels: {
-    all(projectId: string): Promise<readonly { name: string }[]>;
+    all(projectId: string): Promise<readonly { name: string; color?: string }[]>;
   };
   ProjectMembers: {
     all(
@@ -217,9 +224,33 @@ export class GitlabProvider implements IProjectProvider {
     return mapGitlabMilestoneToDomain(raw);
   }
 
+  async listComments(issueId: string): Promise<readonly IComment[]> {
+    const notes = await this.client.IssueNotes.all(this.projectPath, this.parseIssueIid(issueId));
+    return notes
+      .filter((note) => !note.system)
+      .map(mapGitlabNoteToDomain)
+      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  }
+
+  async addComment(issueId: string, body: string): Promise<IComment> {
+    const note = await this.client.IssueNotes.create(
+      this.projectPath,
+      this.parseIssueIid(issueId),
+      body,
+    );
+    return mapGitlabNoteToDomain(note);
+  }
+
   async listLabels(_options?: FetchOptions): Promise<readonly string[]> {
     const labels = await this.client.ProjectLabels.all(this.projectPath);
     return labels.map((label) => label.name);
+  }
+
+  async listLabelColors(_options?: FetchOptions): Promise<Readonly<Record<string, string>>> {
+    const labels = await this.client.ProjectLabels.all(this.projectPath);
+    return Object.fromEntries(
+      labels.flatMap((label) => (label.color ? [[label.name, label.color.replace(/^#/, "")]] : [])),
+    );
   }
 
   async listAssignableUsers(_options?: FetchOptions): Promise<readonly string[]> {
