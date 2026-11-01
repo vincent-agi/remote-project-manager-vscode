@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPrBody, buildPrTitle } from "../../../src/core/git/pr-body";
+import { buildConventionalPrTitle, buildPrBody, buildPrTitle } from "../../../src/core/git/pr-body";
 import type { IIssue } from "../../../src/core/models/issue.model";
 import type { IMilestone } from "../../../src/core/models/milestone.model";
 
@@ -69,5 +69,49 @@ describe("buildPrBody", () => {
   it("omits the commit list when there are no commits", () => {
     const body = buildPrBody(makeIssue(), null, []);
     expect(body).not.toContain("**Commits**");
+  });
+});
+
+describe("buildConventionalPrTitle", () => {
+  const commit = (message: string): { hash: string; message: string } => ({
+    hash: "abc1234",
+    message,
+  });
+
+  it("falls back to the issue title when no commit follows the convention", () => {
+    expect(buildConventionalPrTitle(makeIssue(), [commit("random message")])).toBe(
+      "Add Gitmoji picker (#42)",
+    );
+    expect(buildConventionalPrTitle(makeIssue(), [])).toBe("Add Gitmoji picker (#42)");
+  });
+
+  it("reuses the description of a single conforming commit", () => {
+    expect(buildConventionalPrTitle(makeIssue(), [commit("fix(ui): 🐛 repair the picker")])).toBe(
+      "fix(ui): 🐛 repair the picker (#42)",
+    );
+  });
+
+  it("picks the most significant type and the issue title for several commits", () => {
+    const title = buildConventionalPrTitle(makeIssue(), [
+      commit("chore: 🔧 tidy"),
+      commit("feat: ✨ add picker"),
+      commit("docs: 📝 explain"),
+    ]);
+    expect(title).toBe("feat: ✨ Add Gitmoji picker (#42)");
+  });
+
+  it("keeps the scope only when every commit shares it", () => {
+    expect(
+      buildConventionalPrTitle(makeIssue(), [commit("feat(ui): ✨ a"), commit("fix(ui): 🐛 b")]),
+    ).toBe("feat(ui): ✨ Add Gitmoji picker (#42)");
+    expect(
+      buildConventionalPrTitle(makeIssue(), [commit("feat(ui): ✨ a"), commit("fix(git): 🐛 b")]),
+    ).toBe("feat: ✨ Add Gitmoji picker (#42)");
+  });
+
+  it("does not duplicate an existing issue reference", () => {
+    expect(buildConventionalPrTitle(makeIssue(), [commit("fix: 🐛 repair it (#42)")])).toBe(
+      "fix: 🐛 repair it (#42)",
+    );
   });
 });

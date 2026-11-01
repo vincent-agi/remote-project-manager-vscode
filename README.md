@@ -37,9 +37,9 @@ Three layers following Clean Architecture ([ADR-0001](docs/adr/0001-architecture
 ```mermaid
 flowchart LR
   subgraph PRES["Presentation: src/extension.ts, src/webview/"]
-    EXT[extension.ts<br/>composition root]
+    EXT[extension.ts<br/>activation and composition root]
     PC[PanelController]
-    WV[webview-ui/main.ts<br/>plain script, no bundler]
+    WV[webview-ui/<br/>ES modules, no bundler]
   end
   subgraph CORE["Domain: src/core/ (no VS Code import)"]
     IPP{IProjectProvider}
@@ -89,15 +89,21 @@ src/
   core/            # domain: models, provider interface, auth, automation, git, ai, cache, workspace
   providers/       # github/, gitlab/, git/ (simple-git), caching-project-provider.ts
   webview/         # panel controller, messages, HTML generation
-  webview-ui/      # script running inside the webview (no bundler)
-  extension.ts     # activation and composition root
+  webview-ui/      # ES modules running inside the webview (no bundler)
+  commands/        # command handlers: commit, issue context, pull request, maintenance
+  panel.ts         # the central webview panel and its lifecycle
+  tree-view.ts     # the sidebar tree of assigned issues
+  repository.ts    # which repository is used, and switching between several
+  connection.ts    # providers, tokens and connections
+  state.ts         # mutable state shared between those modules
+  extension.ts     # activation and wiring only
 test/              # Vitest specs mirroring src/
 test-integration/  # real VS Code end-to-end suite
 docs/adr/          # 7 architecture decision records
 docs/functionals/  # functional guides (see INDEX.md)
 ```
 
-**Quality:** 287 Vitest unit tests across 34 files, an end-to-end suite in a real VS Code (`npm run test:integration`), ESLint with type-checked rules, Prettier check. The [CI workflow](.github/workflows/ci.yml) runs compile, lint, format check, tests with a JUnit report, and `vsce package`, uploading the `.vsix` as an artifact.
+**Quality:** hundreds of Vitest unit tests, an end-to-end suite in a real VS Code (`npm run test:integration`), ESLint with type-checked rules, Prettier check. The [CI workflow](.github/workflows/ci.yml) runs compile, lint, format check, tests with a JUnit report, and `vsce package`, uploading the `.vsix` as an artifact.
 
 Deep dives: [`docs/functionals/`](docs/functionals/INDEX.md), [`docs/adr/`](docs/adr/), [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -141,6 +147,22 @@ Beyond the panel, the extension contributes Command Palette entries for a standa
 
 The "active issue" for these commands is resolved from your current branch name (matching `${issue_id}` in `remoteProjectManager.branchNamePattern`), falling back to a picker when it can't be determined.
 
+### Getting Started
+
+New to the extension? Run **Remote Project Manager: Open Walkthrough** (or click **Get Started** in the sidebar) for a guided tour: connect, pick your platform, create an issue, make a first commit.
+
+### Languages
+
+The extension follows VS Code's display language: English and French are provided (manifest, notifications, panel and Git Graph). To add a language, add `package.nls.<lang>.json` and `l10n/bundle.l10n.<lang>.json` next to the French ones, plus a table like the one in `src/webview-ui/translations.ts`; tests fail if a message is left untranslated or a placeholder is lost. The walkthrough pages in `media/walkthrough` are English only.
+
+### Gitea and Forgejo
+
+Besides GitHub and GitLab, the extension works with a [Gitea](https://about.gitea.com) or [Forgejo](https://forgejo.org) instance: set `remoteProjectManager.giteaHost` to its hostname (the `origin` remote is then recognized automatically) and create an access token with read/write access to issues. Issues, milestones, labels, assignees and comments are supported. Two differences to know: Gitea's pull request form cannot be prefilled, so **Create PR from Issue** copies the title and description to the clipboard and opens the compare page; and milestones are numbered by their id. Bitbucket is not supported yet.
+
+### Several repositories in one workspace
+
+With several workspace folders on different repositories, the first time you open the panel you pick one. The choice is remembered per workspace and followed by the sidebar, the status bar and every command. Switch at any time from the drop-down in the panel, the sidebar's title bar, or **Remote Project Manager: Select Repository**.
+
 ### Keyboard Shortcuts
 
 Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kbd>+<kbd>⌥</kbd>+<kbd>R</kbd> instead of <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>, followed by the second key:
@@ -154,15 +176,23 @@ Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kb
 
 ### Extension Settings
 
-| Setting                                       | Type                   | Default                             | Description                                                                                                                                                                        |
-| --------------------------------------------- | ---------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `remoteProjectManager.provider`               | `"github" \| "gitlab"` | `"github"`                          | Remote platform to connect to. Ignored when the repository is auto-detected from a git remote.                                                                                     |
-| `remoteProjectManager.repository`             | `string`               | `""`                                | Repository or project path, e.g. `"owner/repo"`. Fallback used only when no git remote is detected; the workspace's git remote always wins.                                        |
-| `remoteProjectManager.gitlabHost`             | `string`               | `""`                                | Hostname of a self-hosted GitLab instance (e.g. `"gitlab.example.com"`), used to both auto-detect repositories on that host and connect to its API. Leave empty to use gitlab.com. |
-| `remoteProjectManager.cacheTtlSeconds`        | `number`               | `180`                               | How long issue/milestone/capability reads are cached before refetching, in seconds. Use the panel's Refresh button to bypass the cache immediately.                                |
-| `remoteProjectManager.autoBranchOnInProgress` | `boolean`              | `true`                              | Automatically create and check out a git branch when an issue assigned to you moves to "in progress." When off, a suggested branch name is shown instead.                          |
-| `remoteProjectManager.branchNamePattern`      | `string`               | `"${type}/${issue_id}-${slug}"`     | Pattern for auto-created branch names. Placeholders: `${type}` (inferred from labels), `${issue_id}` (issue number), `${slug}` (sanitized title).                                  |
-| `remoteProjectManager.aiContextFile`          | `string`               | `".github/copilot-instructions.md"` | Workspace-relative path **Export Milestone Context for AI Agents** writes to. Only the extension-managed section is replaced on re-export; the rest of the file is left untouched. |
+| Setting                                           | Type                              | Default                             | Description                                                                                                                                                                        |
+| ------------------------------------------------- | --------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `remoteProjectManager.provider`                   | `"github" \| "gitlab" \| "gitea"` | `"github"`                          | Remote platform to connect to. Ignored when the repository is auto-detected from a git remote.                                                                                     |
+| `remoteProjectManager.repository`                 | `string`                          | `""`                                | Repository or project path, e.g. `"owner/repo"`. Fallback used only when no git remote is detected; the workspace's git remote always wins.                                        |
+| `remoteProjectManager.gitlabHost`                 | `string`                          | `""`                                | Hostname of a self-hosted GitLab instance (e.g. `"gitlab.example.com"`), used to both auto-detect repositories on that host and connect to its API. Leave empty to use gitlab.com. |
+| `remoteProjectManager.giteaHost`                  | `string`                          | `""`                                | Hostname of a Gitea/Forgejo instance (e.g. `git.example.com`), used to detect its repositories and to reach its API. Required for Gitea.                                           |
+| `remoteProjectManager.cacheTtlSeconds`            | `number`                          | `180`                               | How long issue/milestone/capability reads are cached before refetching, in seconds. Use the panel's Refresh button to bypass the cache immediately.                                |
+| `remoteProjectManager.autoBranchOnInProgress`     | `boolean`                         | `true`                              | Automatically create and check out a git branch when an issue assigned to you moves to "in progress." When off, a suggested branch name is shown instead.                          |
+| `remoteProjectManager.branchNamePattern`          | `string`                          | `"${type}/${issue_id}-${slug}"`     | Pattern for auto-created branch names. Placeholders: `${type}` (inferred from labels), `${issue_id}` (issue number), `${slug}` (sanitized title).                                  |
+| `remoteProjectManager.aiContextFile`              | `string`                          | `".github/copilot-instructions.md"` | Workspace-relative path **Export Milestone Context for AI Agents** writes to. Only the extension-managed section is replaced on re-export; the rest of the file is left untouched. |
+| `remoteProjectManager.aiContextFiles`             | `string[]`                        | `[]`                                | Several files to export the milestone context to (e.g. `CLAUDE.md`, `AGENTS.md`, `.cursorrules`); replaces `aiContextFile` when set.                                               |
+| `remoteProjectManager.aiContextAutoUpdate`        | `boolean`                         | `false`                             | Rewrite the exported files automatically when the issues of the last exported milestone change.                                                                                    |
+| `remoteProjectManager.syncMarkInProgressOnCommit` | `boolean`                         | `true`                              | Add the `in-progress` label to your assigned issue after your first commit on its branch.                                                                                          |
+| `remoteProjectManager.syncRemindMissingIssue`     | `boolean`                         | `true`                              | Remind you once per branch when you commit on a branch that references no issue.                                                                                                   |
+| `remoteProjectManager.syncProposeCloseOnMerge`    | `boolean`                         | `true`                              | Offer to close an open issue already closed by a `Fixes/Closes/Resolves #N` commit on the default branch.                                                                          |
+| `remoteProjectManager.todoCodeLens`               | `boolean`                         | `true`                              | Show a CodeLens and link on `TODO`/`FIXME` comments (linked issue, or "Create issue from TODO").                                                                                   |
+| `remoteProjectManager.autoRefreshSeconds`         | `number`                          | `300`                               | Refresh the sidebar and open panel at this interval while the window is focused (min 30, `0` = off). Also drives the activity-bar badge of issues assigned to you.                 |
 
 ## 4. Lessons learned
 

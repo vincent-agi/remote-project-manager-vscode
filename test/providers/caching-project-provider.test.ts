@@ -66,6 +66,9 @@ function makeInner(): IProjectProvider {
     updateMilestone: vi.fn().mockResolvedValue(milestone),
     listLabels: vi.fn().mockResolvedValue(["bug"]),
     listAssignableUsers: vi.fn().mockResolvedValue(["octocat"]),
+    listLabelColors: vi.fn().mockResolvedValue({}),
+    listComments: vi.fn().mockResolvedValue([]),
+    addComment: vi.fn(),
   };
 }
 
@@ -179,5 +182,29 @@ describe("CachingProjectProvider passthroughs", () => {
     expect(inner.getIssue).toHaveBeenCalledTimes(2);
     expect(inner.getMilestone).toHaveBeenCalledTimes(1);
     expect(inner.getCurrentUser).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("CachingProjectProvider comments", () => {
+  it("reads comments straight through, uncached", async () => {
+    const inner = makeInner();
+    const provider = new CachingProjectProvider(inner, 60_000);
+
+    await provider.listComments("x#1");
+    await provider.listComments("x#1");
+
+    expect(inner.listComments).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates the cached issue list after a comment is added", async () => {
+    const inner = makeInner();
+    (inner.addComment as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "1" });
+    const provider = new CachingProjectProvider(inner, 60_000);
+
+    await provider.listIssues();
+    await provider.addComment("x#1", "hi");
+    await provider.listIssues();
+
+    expect(inner.listIssues).toHaveBeenCalledTimes(2);
   });
 });

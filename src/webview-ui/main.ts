@@ -1,24 +1,91 @@
-// This file compiles with module:"none" into a single plain <script> —
-// no bundler, no ES module graph — so it cannot use real `import`
-// statements. The message shapes and the hasStateChanged logic below are
-// therefore manually mirrored from src/webview/messages.ts and
-// src/webview-ui/state-diff.ts (which stays the unit-tested source of
-// truth for the diff algorithm); keep them in sync by hand.
+// This file compiles to an ES module loaded with `<script type="module">`.
+// Pure logic lives in sibling modules (imported with a `.js` extension, as
+// the browser sees the compiled output) so it can be unit tested. The
+// message shapes below are mirrored by hand from src/webview/messages.ts,
+// because the host and webview programs have separate `rootDir`s.
 
-function hasStateChanged<T>(previous: T | null, next: T): boolean {
-  if (previous === null) {
-    return true;
-  }
-  if (previous === next) {
-    return false;
-  }
-  return JSON.stringify(previous) !== JSON.stringify(next);
+import { hasStateChanged } from "./state-diff.js";
+import { setLanguage, t } from "./i18n.js";
+import {
+  BOARD_COLUMNS,
+  buildBoard,
+  describeColumn,
+  planBoardMove,
+  type BoardColumnId,
+} from "./board-model.js";
+import { describeCacheAge } from "./cache-age.js";
+import { readableBadgeColors } from "./contrast.js";
+import { markSeen, readSeenComments, unseenComments, type SeenComments } from "./comment-state.js";
+import { renderMarkdown } from "./markdown.js";
+import { enhanceMarkdownEditor } from "./markdown-editor.js";
+import { moveSelection, shortcutFor, shortcutHelp } from "./keyboard-shortcuts.js";
+import {
+  computeMilestoneProgress,
+  describeDue,
+  type MilestoneProgress,
+} from "./milestone-progress.js";
+import {
+  EMPTY_FILTER,
+  filterIssues,
+  NO_MILESTONE,
+  PRESET_FILTERS,
+  readSavedFilters,
+  removeSavedFilter,
+  sameFilter,
+  upsertSavedFilter,
+  describeGroup,
+  describePreset,
+  describeSort,
+  groupIssues,
+  ISSUE_GROUPS,
+  ISSUE_SORTS,
+  readListPrefs,
+  sortIssues,
+  type IssueFilter,
+  type IssueGroup,
+  type IssueSort,
+  type SavedFilter,
+} from "./issue-view-model.js";
+
+type SettingKindView =
+  | { type: "boolean" }
+  | { type: "number"; min: number }
+  | { type: "string" }
+  | { type: "list" }
+  | { type: "enum"; values: string[] };
+
+interface SettingEntryView {
+  key: string;
+  group: string;
+  groupLabel: string;
+  label: string;
+  hint: string;
+  kind: SettingKindView;
+  scope: "workspace" | "user";
+  value: unknown;
+  defaultValue: unknown;
+  isDefault: boolean;
+}
+
+interface CommentView {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  url?: string;
+}
+
+interface IssueTemplateView {
+  name: string;
+  body: string;
+  title?: string;
+  labels: readonly string[];
 }
 
 interface RepositoryOptionView {
   id: string;
   label: string;
-  provider: "github" | "gitlab";
+  provider: "github" | "gitlab" | "gitea";
   repository: string;
 }
 
@@ -68,6 +135,7 @@ interface StateSnapshot {
   currentUser: AuthenticatedUser;
   availableLabels: string[];
   availableAssignableUsers: string[];
+  labelColors: Record<string, string>;
 }
 
 type OutboundMessage =
@@ -79,20 +147,27 @@ type OutboundMessage =
       currentUser: AuthenticatedUser;
       availableLabels: string[];
       availableAssignableUsers: string[];
+      labelColors: Record<string, string>;
+      dataFetchedAt?: number;
     }
-  | { type: "repositoryOptions"; options: RepositoryOptionView[] }
+  | { type: "uiPrefs"; prefs: Record<string, unknown> }
+  | { type: "issueTemplates"; templates: IssueTemplateView[] }
+  | { type: "comments"; issueId: string; comments: CommentView[] }
+  | { type: "settings"; entries: SettingEntryView[] }
+  | { type: "branchNamePreview"; pattern: string; example: string; warnings: string[] }
+  | { type: "repositoryOptions"; options: RepositoryOptionView[]; selectedId?: string }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
   | { type: "openNewMilestoneForm" }
   | { type: "actionSuccess"; message: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; authError?: boolean };
 
 type InboundMessage =
   | { type: "requestState"; forceRefresh?: boolean }
   | { type: "selectRepository"; id: string }
   | {
       type: "createIssue";
-      input: { title: string; body: string; milestoneId?: string | null };
+      input: { title: string; body: string; milestoneId?: string | null; labels?: string[] };
     }
   | {
       type: "updateIssue";
@@ -110,13 +185,26 @@ type InboundMessage =
       id: string;
       patch: Partial<Pick<MilestoneView, "title" | "description" | "state" | "dueOn">>;
     }
-  | { type: "createBranchForIssue"; id: string };
+  | { type: "createBranchForIssue"; id: string }
+  | { type: "saveUiPrefs"; prefs: Record<string, unknown> }
+  | { type: "reconnect" }
+  | { type: "requestIssueTemplates" }
+  | { type: "requestComments"; issueId: string }
+  | { type: "requestSettings" }
+  | { type: "updateSetting"; key: string; value: unknown }
+  | {
+      type: "previewBranchName";
+      pattern: string;
+      sample: { title: string; number: number; labels: string[] };
+    }
+  | { type: "addComment"; issueId: string; body: string };
 
 declare function acquireVsCodeApi(): {
   postMessage(message: InboundMessage): void;
 };
 
 const vscodeApi = acquireVsCodeApi();
+setLanguage(document.documentElement.lang);
 
 let currentIssues: IssueView[] = [];
 let currentMilestones: MilestoneView[] = [];
@@ -129,13 +217,23 @@ let currentCapabilities: Capabilities = {
 let currentUser: AuthenticatedUser | null = null;
 let currentAvailableLabels: string[] = [];
 let currentAvailableAssignableUsers: string[] = [];
+let currentLabelColors: Record<string, string> = {};
 let selectedIssueId: string | null = null;
 let selectedMilestoneId: string | null = null;
-let issueMilestoneFilter: string | null = null;
-let issueSearchQuery = "";
-let issueLabelFilter: string | null = null;
-let issueAssigneeFilter: string | null = null;
-let issueStateFilter: "all" | "open" | "closed" = "all";
+let issueFilter: IssueFilter = EMPTY_FILTER;
+let uiPrefs: Record<string, unknown> = {};
+let savedFilters: SavedFilter[] = [];
+let visibleIssueIds: string[] = [];
+let issueTemplates: IssueTemplateView[] = [];
+let seenComments: SeenComments = {};
+const commentsByIssue = new Map<string, CommentView[]>();
+/** Comment count each cached comment list was fetched at, to spot new ones after a refresh. */
+const commentsFetchedAtCount = new Map<string, number>();
+const commentRequestsInFlight = new Set<string>();
+let commentSubmitIssueId: string | null = null;
+let templatesRequested = false;
+let issueSort: IssueSort = "default";
+let issueGroup: IssueGroup = "none";
 let milestoneStateFilter: "all" | "open" | "closed" = "all";
 const LIST_PAGE_SIZE = 50;
 let issueListPageSize = LIST_PAGE_SIZE;
@@ -158,12 +256,30 @@ function byId<T extends HTMLElement>(id: string): T {
 
 let errorTimer: number | undefined;
 
-function showError(message: string): void {
+function showError(message: string, authError = false): void {
   const banner = byId<HTMLDivElement>("error-banner");
-  banner.textContent = message;
-  banner.hidden = false;
+  banner.textContent = t(message);
   window.clearTimeout(errorTimer);
-  errorTimer = window.setTimeout(clearError, 5000);
+  if (authError) {
+    // An expired token will not fix itself: keep the banner and offer the fix.
+    const reconnect = document.createElement("button");
+    reconnect.type = "button";
+    reconnect.className = "tab";
+    reconnect.textContent = t("Reconnect");
+    reconnect.addEventListener("click", () => post({ type: "reconnect" }));
+    banner.append(" ", reconnect);
+  } else {
+    errorTimer = window.setTimeout(clearError, 5000);
+  }
+  banner.hidden = false;
+  commentSubmitIssueId = null;
+  const commentButton = document.getElementById("comment-add") as HTMLButtonElement | null;
+  if (commentButton) {
+    commentButton.disabled = false;
+  }
+  setRefreshing(false);
+  // A failure before the first state would otherwise leave skeletons pulsing forever.
+  document.querySelectorAll(".skeleton-row").forEach((row) => row.remove());
 }
 
 function clearError(): void {
@@ -173,11 +289,28 @@ function clearError(): void {
   banner.textContent = "";
 }
 
+let lastFetchedAt: number | undefined;
+
+/** Shows how stale the data is once it is over a minute old. */
+function updateCacheBanner(): void {
+  const text = describeCacheAge(lastFetchedAt, Date.now(), t);
+  const banner = byId<HTMLDivElement>("cache-banner");
+  banner.hidden = text === null;
+  byId<HTMLSpanElement>("cache-banner-text").textContent = text ?? "";
+}
+
+function setRefreshing(refreshing: boolean): void {
+  const button = byId<HTMLButtonElement>("refresh-button");
+  button.disabled = refreshing;
+  button.textContent = refreshing ? `\u21BB ${t("Refreshing…")}` : `\u21BB ${t("Refresh")}`;
+  document.body.setAttribute("aria-busy", String(refreshing));
+}
+
 let toastTimer: number | undefined;
 
 function showToast(message: string): void {
   const toast = byId<HTMLDivElement>("toast");
-  toast.textContent = message;
+  toast.textContent = t(message);
   toast.className = "toast toast-success";
   toast.hidden = false;
   window.clearTimeout(toastTimer);
@@ -201,70 +334,162 @@ function findMilestone(milestoneId: string | null): MilestoneView | undefined {
   return currentMilestones.find((candidate) => candidate.id === milestoneId);
 }
 
+/**
+ * Colours label badges with the label's real colour, adjusted to stay
+ * readable. Colours are set through the CSSOM because the webview CSP
+ * forbids inline `style` attributes. High-contrast themes keep their own
+ * badge colours, which are chosen for accessibility.
+ */
+function applyLabelColors(root: ParentNode): void {
+  const highContrast =
+    document.body.classList.contains("vscode-high-contrast") ||
+    document.body.classList.contains("vscode-high-contrast-light") ||
+    window.matchMedia("(forced-colors: active)").matches;
+  if (highContrast) {
+    return;
+  }
+  root.querySelectorAll<HTMLElement>(".badge[data-label]").forEach((badge) => {
+    const color = currentLabelColors[badge.dataset.label ?? ""];
+    const colors = color ? readableBadgeColors(color) : null;
+    if (colors) {
+      badge.style.backgroundColor = colors.background;
+      badge.style.color = colors.foreground;
+    }
+  });
+}
+
 function renderLabelBadges(labels: readonly string[]): string {
   if (labels.length === 0) {
     return "";
   }
   return `<span class="badges">${labels
-    .map((label) => `<span class="badge">${escapeHtml(label)}</span>`)
+    .map(
+      (label) =>
+        `<span class="badge" data-label="${escapeAttr(label)}">${escapeHtml(label)}</span>`,
+    )
     .join("")}</span>`;
+}
+
+function renderEmptyState(
+  message: string,
+  actionLabel: string | null,
+  onAction: () => void,
+): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "empty-state";
+  const text = document.createElement("p");
+  text.textContent = message;
+  wrapper.appendChild(text);
+  if (actionLabel) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tab";
+    button.textContent = actionLabel;
+    button.addEventListener("click", onAction);
+    wrapper.appendChild(button);
+  }
+  return wrapper;
 }
 
 function renderIssueList(): void {
   const list = byId<HTMLDivElement>("issue-list");
   list.innerHTML = "";
-  const query = issueSearchQuery.trim().toLowerCase();
-  const issues = currentIssues.filter((candidate) => {
-    if (issueMilestoneFilter && candidate.milestoneId !== issueMilestoneFilter) {
-      return false;
-    }
-    if (
-      query &&
-      !candidate.title.toLowerCase().includes(query) &&
-      !candidate.body.toLowerCase().includes(query)
-    ) {
-      return false;
-    }
-    if (issueLabelFilter && !candidate.labels.includes(issueLabelFilter)) {
-      return false;
-    }
-    if (issueAssigneeFilter) {
-      const wanted =
-        issueAssigneeFilter === "@me" ? (currentUser?.username ?? null) : issueAssigneeFilter;
-      if (!wanted || !candidate.assignees.includes(wanted)) {
-        return false;
-      }
-    }
-    if (issueStateFilter !== "all" && candidate.state !== issueStateFilter) {
-      return false;
-    }
-    return true;
-  });
-  const visibleIssues = issues.slice(0, issueListPageSize);
-  for (const issue of visibleIssues) {
-    const item = document.createElement("div");
-    item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
-    const stateClass = issue.state === "closed" ? " state-closed" : "";
-    item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}`;
-    item.addEventListener("click", () => {
-      selectedIssueId = issue.id;
-      showNewIssueForm = false;
-      renderIssueList();
-      renderIssueDetail();
-    });
-    list.appendChild(item);
+  const filtered = filterIssues(currentIssues, issueFilter, currentUser?.username ?? null);
+  const sections = groupIssues(
+    sortIssues(filtered, issueSort),
+    issueGroup,
+    new Map(currentMilestones.map((milestone) => [milestone.id, milestone.title])),
+    t,
+  );
+
+  visibleIssueIds = [];
+  if (filtered.length === 0) {
+    list.appendChild(
+      renderEmptyState(
+        currentIssues.length === 0
+          ? t("No issues in this repository yet.")
+          : t("No issues match the current filters."),
+        currentIssues.length === 0 ? null : t("Clear filters"),
+        () => setIssueFilter(EMPTY_FILTER),
+      ),
+    );
+    return;
   }
-  if (issues.length > visibleIssues.length) {
+  // Paging counts issues across sections: stop once the page is full.
+  let remainingSlots = issueListPageSize;
+  for (const section of sections) {
+    if (remainingSlots <= 0) {
+      break;
+    }
+    const visible = section.issues.slice(0, remainingSlots);
+    remainingSlots -= visible.length;
+    if (section.title) {
+      const header = document.createElement("div");
+      header.className = "group-header";
+      header.textContent = `${section.title} (${section.issues.length})`;
+      list.appendChild(header);
+    }
+    for (const issue of visible) {
+      visibleIssueIds.push(issue.id);
+      const item = document.createElement("div");
+      item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
+      item.dataset.issueId = issue.id;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(issue.id === selectedIssueId));
+      item.tabIndex = 0;
+      const stateClass = issue.state === "closed" ? " state-closed" : "";
+      const unseen =
+        issue.id === selectedIssueId
+          ? 0
+          : unseenComments(seenComments, issue.id, issue.commentsCount);
+      const newComments =
+        unseen > 0
+          ? `<span class="badge new-comments" title="${escapeAttr(unseen === 1 ? t("1 new comment") : t("{0} new comments", unseen))}">+${unseen} &#128172;</span>`
+          : "";
+      item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}${newComments}`;
+      const choose = (): void => {
+        selectedIssueId = issue.id;
+        showNewIssueForm = false;
+        renderIssueList();
+        renderIssueDetail();
+        document
+          .querySelector<HTMLElement>(`#issue-list .item[data-issue-id="${CSS.escape(issue.id)}"]`)
+          ?.focus();
+      };
+      item.addEventListener("click", choose);
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          choose();
+        }
+      });
+      list.appendChild(item);
+    }
+  }
+  applyLabelColors(list);
+  if (filtered.length > issueListPageSize) {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
     loadMore.className = "load-more";
-    loadMore.textContent = `Load more (${issues.length - visibleIssues.length} remaining)`;
+    loadMore.textContent = t("Load more ({0} remaining)", filtered.length - issueListPageSize);
     loadMore.addEventListener("click", () => {
       issueListPageSize += LIST_PAGE_SIZE;
       renderIssueList();
     });
     list.appendChild(loadMore);
   }
+}
+
+function markdownSources(): {
+  issues: { number: number; title: string }[];
+  users: string[];
+  labels: string[];
+} {
+  return {
+    issues: currentIssues.map(({ number, title }) => ({ number, title })),
+    users: currentAvailableAssignableUsers,
+    labels: currentAvailableLabels,
+  };
 }
 
 function renderNewIssueForm(): void {
@@ -276,23 +501,55 @@ function renderNewIssueForm(): void {
     )
     .join("");
   detail.innerHTML = `
-    <h3>New Issue</h3>
+    <h3>${t("New Issue")}</h3>
 
-    <label for="new-issue-title">Title</label>
+    ${
+      issueTemplates.length > 0
+        ? `<label for="new-issue-template">${t("Template")}</label>
+    <select id="new-issue-template">
+      <option value="">${t("No template")}</option>
+      ${issueTemplates
+        .map((template, index) => `<option value="${index}">${escapeHtml(template.name)}</option>`)
+        .join("")}
+    </select>`
+        : ""
+    }
+
+    <label for="new-issue-title">${t("Title")}</label>
     <input id="new-issue-title" type="text" />
 
-    <label for="new-issue-body">Body</label>
+    <label for="new-issue-body">${t("Body")}</label>
     <textarea id="new-issue-body"></textarea>
 
-    <label for="new-issue-milestone">Milestone</label>
+    <label for="new-issue-milestone">${t("Milestone")}</label>
     <select id="new-issue-milestone">
       <option value="">—</option>
       ${milestoneOptions}
     </select>
 
-    <button id="new-issue-create" type="button">Create</button>
-    <button id="new-issue-cancel" type="button">Cancel</button>
+    <button id="new-issue-create" type="button">${t("Create")}</button>
+    <button id="new-issue-cancel" type="button">${t("Cancel")}</button>
   `;
+
+  enhanceMarkdownEditor(byId<HTMLTextAreaElement>("new-issue-body"), markdownSources);
+
+  let templateLabels: string[] = [];
+  document.getElementById("new-issue-template")?.addEventListener("change", (event) => {
+    const template = issueTemplates[Number((event.target as HTMLSelectElement).value)];
+    templateLabels = template ? [...template.labels] : [];
+    if (!template) {
+      return;
+    }
+    const titleInput = byId<HTMLInputElement>("new-issue-title");
+    if (!titleInput.value.trim() && template.title) {
+      titleInput.value = template.title;
+    }
+    // Never overwrite what the user already typed: append after it.
+    const bodyInput = byId<HTMLTextAreaElement>("new-issue-body");
+    bodyInput.value = bodyInput.value.trim()
+      ? `${bodyInput.value}\n\n${template.body}`
+      : template.body;
+  });
 
   byId<HTMLButtonElement>("new-issue-cancel").addEventListener("click", () => {
     showNewIssueForm = false;
@@ -302,14 +559,70 @@ function renderNewIssueForm(): void {
   byId<HTMLButtonElement>("new-issue-create").addEventListener("click", () => {
     const title = byId<HTMLInputElement>("new-issue-title").value.trim();
     if (!title) {
-      showError("Title is required.");
+      showError(t("Title is required."));
       return;
     }
     const body = byId<HTMLTextAreaElement>("new-issue-body").value;
     const milestoneId = byId<HTMLSelectElement>("new-issue-milestone").value || null;
-    post({ type: "createIssue", input: { title, body, milestoneId } });
+    post({
+      type: "createIssue",
+      input: {
+        title,
+        body,
+        milestoneId,
+        ...(templateLabels.length > 0 ? { labels: templateLabels } : {}),
+      },
+    });
     showNewIssueForm = false;
   });
+}
+
+/** Renders the cached comments of `issue` (or a loading note) and fetches them when stale. */
+function showCommentsFor(issue: IssueView): void {
+  // Opening an issue marks its comments as seen; only re-render the list when that changed anything.
+  const nextSeen = markSeen(seenComments, issue.id, issue.commentsCount);
+  if (nextSeen !== seenComments) {
+    seenComments = nextSeen;
+    uiPrefs = { ...uiPrefs, seenComments };
+    post({ type: "saveUiPrefs", prefs: uiPrefs });
+    renderIssueList();
+  }
+
+  const cached = commentsByIssue.get(issue.id);
+  const stale = commentsFetchedAtCount.get(issue.id) !== issue.commentsCount;
+  renderComments(issue.id);
+  if ((!cached || stale) && !commentRequestsInFlight.has(issue.id)) {
+    commentRequestsInFlight.add(issue.id);
+    post({ type: "requestComments", issueId: issue.id });
+  }
+}
+
+function renderComments(issueId: string): void {
+  const container = document.getElementById("issue-comments");
+  if (!container || selectedIssueId !== issueId) {
+    return;
+  }
+  const comments = commentsByIssue.get(issueId);
+  if (!comments) {
+    container.textContent = t("Loading comments…");
+    return;
+  }
+  if (comments.length === 0) {
+    container.innerHTML = `<p class="read-only-note">${t("No comments yet.")}</p>`;
+    return;
+  }
+  container.innerHTML = comments
+    .map(
+      (comment) => `<article class="comment">
+        <header><strong>${escapeHtml(comment.author)}</strong> <span class="comment-date">${formatDate(comment.createdAt)}</span>${
+          comment.url
+            ? ` <a href="${escapeAttr(safeHref(comment.url))}" target="_blank" rel="noopener noreferrer">${t("link")}</a>`
+            : ""
+        }</header>
+        <div class="md-preview">${renderMarkdown(comment.body)}</div>
+      </article>`,
+    )
+    .join("");
 }
 
 function renderIssueDetail(): void {
@@ -320,7 +633,7 @@ function renderIssueDetail(): void {
   }
   const issue = currentIssues.find((candidate) => candidate.id === selectedIssueId);
   if (!issue) {
-    detail.innerHTML = `<p>Select an issue to view details.</p>`;
+    detail.innerHTML = `<p>${t("Select an issue to view details.")}</p>`;
     return;
   }
 
@@ -334,34 +647,34 @@ function renderIssueDetail(): void {
   ).sort();
   detail.innerHTML = `
     <div class="meta">
-      <div class="meta-row"><span class="meta-key">Number</span><span class="meta-value">#${issue.number}</span></div>
-      <div class="meta-row"><span class="meta-key">Link</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.url)}</a></span></div>
-      <div class="meta-row"><span class="meta-key">Branch</span><span class="meta-value"><button id="issue-create-branch" type="button" class="assign-to-me">Create branch</button></span></div>
-      <div class="meta-row"><span class="meta-key">Milestone</span><span class="meta-value">${milestone ? escapeHtml(milestone.title) : "—"}</span></div>
-      <div class="meta-row"><span class="meta-key">Labels</span><span class="meta-value">${issue.labels.length > 0 ? renderLabelBadges(issue.labels) : "—"}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Number")}</span><span class="meta-value">#${issue.number}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Link")}</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.url)}</a></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Branch")}</span><span class="meta-value"><button id="issue-create-branch" type="button" class="assign-to-me">${t("Create branch")}</button></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Milestone")}</span><span class="meta-value">${milestone ? escapeHtml(milestone.title) : "—"}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Labels")}</span><span class="meta-value">${issue.labels.length > 0 ? renderLabelBadges(issue.labels) : "—"}</span></div>
       <div class="meta-row">
-        <span class="meta-key">Assignees</span>
+        <span class="meta-key">${t("Assignees")}</span>
         <span class="meta-value">
           ${issue.assignees.length > 0 ? issue.assignees.map(escapeHtml).join(", ") : "—"}
-          ${showAssignToMe ? '<button id="issue-assign-to-me" type="button" class="assign-to-me">Assign to me</button>' : ""}
+          ${showAssignToMe ? `<button id="issue-assign-to-me" type="button" class="assign-to-me">${t("Assign to me")}</button>` : ""}
         </span>
       </div>
-      <div class="meta-row"><span class="meta-key">Comments</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${issue.commentsCount}</a></span></div>
-      <div class="meta-row"><span class="meta-key">Created</span><span class="meta-value">${formatDate(issue.createdAt)}</span></div>
-      <div class="meta-row"><span class="meta-key">Updated</span><span class="meta-value">${formatDate(issue.updatedAt)}</span></div>
-      <div class="meta-row"><span class="meta-key">Closed</span><span class="meta-value">${formatDate(issue.closedAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Comments")}</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${issue.commentsCount}</a></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Created")}</span><span class="meta-value">${formatDate(issue.createdAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Updated")}</span><span class="meta-value">${formatDate(issue.updatedAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Closed on")}</span><span class="meta-value">${formatDate(issue.closedAt)}</span></div>
     </div>
 
-    <label for="issue-title">Title</label>
+    <label for="issue-title">${t("Title")}</label>
     <input id="issue-title" type="text" value="${escapeAttr(issue.title)}" ${canWrite ? "" : "disabled"} />
 
-    <label for="issue-state">State</label>
+    <label for="issue-state">${t("State")}</label>
     <select id="issue-state" ${canWrite ? "" : "disabled"}>
-      <option value="open" ${issue.state === "open" ? "selected" : ""}>Open</option>
-      <option value="closed" ${issue.state === "closed" ? "selected" : ""}>Closed</option>
+      <option value="open" ${issue.state === "open" ? "selected" : ""}>${t("Open")}</option>
+      <option value="closed" ${issue.state === "closed" ? "selected" : ""}>${t("Closed")}</option>
     </select>
 
-    <label for="issue-milestone-editor">Milestone</label>
+    <label for="issue-milestone-editor">${t("Milestone")}</label>
     <select id="issue-milestone-editor" ${canWrite ? "" : "disabled"}>
       <option value="">—</option>
       ${currentMilestones
@@ -372,8 +685,8 @@ function renderIssueDetail(): void {
         .join("")}
     </select>
 
-    <label for="issue-labels-editor">Labels</label>
-    <div id="issue-labels-editor" class="checkbox-list">
+    <span id="issue-labels-heading" class="field-heading">${t("Labels")}</span>
+    <div id="issue-labels-editor" class="checkbox-list" role="group" aria-labelledby="issue-labels-heading">
       ${
         labelOptions.length > 0
           ? labelOptions
@@ -382,12 +695,12 @@ function renderIssueDetail(): void {
                   `<label><input type="checkbox" value="${escapeAttr(label)}" ${issue.labels.includes(label) ? "checked" : ""} ${canWrite ? "" : "disabled"} /> ${escapeHtml(label)}</label>`,
               )
               .join("")
-          : `<span class="read-only-note">No labels available on this repository.</span>`
+          : `<span class="read-only-note">${t("No labels available on this repository.")}</span>`
       }
     </div>
 
-    <label for="issue-assignees-editor">Assignees</label>
-    <div id="issue-assignees-editor" class="checkbox-list">
+    <span id="issue-assignees-heading" class="field-heading">${t("Assignees")}</span>
+    <div id="issue-assignees-editor" class="checkbox-list" role="group" aria-labelledby="issue-assignees-heading">
       ${
         assigneeOptions.length > 0
           ? assigneeOptions
@@ -396,16 +709,43 @@ function renderIssueDetail(): void {
                   `<label><input type="checkbox" value="${escapeAttr(username)}" ${issue.assignees.includes(username) ? "checked" : ""} ${canWrite ? "" : "disabled"} /> ${escapeHtml(username)}</label>`,
               )
               .join("")
-          : `<span class="read-only-note">No assignable users found for this repository.</span>`
+          : `<span class="read-only-note">${t("No assignable users found for this repository.")}</span>`
       }
     </div>
 
-    <label for="issue-body">Body</label>
+    <label for="issue-body">${t("Body")}</label>
     <textarea id="issue-body" ${canWrite ? "" : "disabled"}>${escapeHtml(issue.body)}</textarea>
 
-    <button id="issue-save" ${canWrite ? "" : "disabled"}>Save</button>
-    ${canWrite ? "" : '<p class="read-only-note">Your account does not have write access to issues.</p>'}
+    <button id="issue-save" ${canWrite ? "" : "disabled"}>${t("Save")}</button>
+    ${canWrite ? "" : `<p class="read-only-note">${t("Your account does not have write access to issues.")}</p>`}
+
+    <h3>${t("Comments ({0})", issue.commentsCount)}</h3>
+    <div id="issue-comments" aria-live="polite"></div>
+    ${
+      canWrite
+        ? `<label for="comment-body">${t("Add a comment")}</label>
+    <textarea id="comment-body"></textarea>
+    <button id="comment-add" type="button">${t("Comment")}</button>`
+        : ""
+    }
   `;
+
+  applyLabelColors(detail);
+  enhanceMarkdownEditor(byId<HTMLTextAreaElement>("issue-body"), markdownSources);
+  if (canWrite) {
+    enhanceMarkdownEditor(byId<HTMLTextAreaElement>("comment-body"), markdownSources);
+    byId<HTMLButtonElement>("comment-add").addEventListener("click", () => {
+      const body = byId<HTMLTextAreaElement>("comment-body").value;
+      if (!body.trim()) {
+        showError(t("A comment cannot be empty."));
+        return;
+      }
+      commentSubmitIssueId = issue.id;
+      byId<HTMLButtonElement>("comment-add").disabled = true;
+      post({ type: "addComment", issueId: issue.id, body });
+    });
+  }
+  showCommentsFor(issue);
 
   byId<HTMLButtonElement>("issue-create-branch").addEventListener("click", () => {
     post({ type: "createBranchForIssue", id: issue.id });
@@ -447,6 +787,32 @@ function renderIssueDetail(): void {
   }
 }
 
+function milestoneProgress(milestone: MilestoneView): MilestoneProgress {
+  const linkedStates = currentIssues
+    .filter((candidate) => candidate.milestoneId === milestone.id)
+    .map((candidate) => candidate.state);
+  return computeMilestoneProgress(milestone, linkedStates, new Date());
+}
+
+/**
+ * Progress bar with a text alternative; overdue is shown by a warning mark,
+ * not colour alone. A native `<progress>` is used because the webview CSP
+ * forbids inline `style` attributes, which a width-based bar would need.
+ */
+function renderProgressBar(progress: MilestoneProgress): string {
+  const summary = t(
+    "{0} of {1} issues closed ({2}%)",
+    progress.closed,
+    progress.total,
+    progress.percent,
+  );
+  const due = describeDue(progress, t);
+  return `<div class="progress-block${progress.overdue ? " overdue" : ""}">
+    <progress class="progress" max="100" value="${progress.percent}" aria-label="${escapeAttr(summary)}"></progress>
+    <div class="progress-caption"><span>${escapeHtml(summary)}</span><span class="progress-due">${progress.overdue ? "&#9888; " : ""}${escapeHtml(due)}</span></div>
+  </div>`;
+}
+
 function renderMilestoneList(): void {
   const list = byId<HTMLDivElement>("milestone-list");
   list.innerHTML = "";
@@ -454,15 +820,36 @@ function renderMilestoneList(): void {
     milestoneStateFilter === "all"
       ? currentMilestones
       : currentMilestones.filter((candidate) => candidate.state === milestoneStateFilter);
+  if (milestones.length === 0) {
+    list.appendChild(
+      renderEmptyState(
+        currentMilestones.length === 0
+          ? t("No milestones in this repository yet.")
+          : t("No milestones match the current filter."),
+        null,
+        () => undefined,
+      ),
+    );
+    return;
+  }
   const visibleMilestones = milestones.slice(0, milestoneListPageSize);
   for (const milestone of visibleMilestones) {
     const item = document.createElement("div");
     item.className = "item" + (milestone.id === selectedMilestoneId ? " selected" : "");
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(milestone.id === selectedMilestoneId));
+    item.tabIndex = 0;
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        item.click();
+      }
+    });
     const stateClass = milestone.state === "closed" ? " state-closed" : "";
     const due = milestone.dueOn
-      ? `<span class="due">Due ${formatDate(milestone.dueOn)}</span>`
+      ? `<span class="due">${t("Due {0}", formatDate(milestone.dueOn))}</span>`
       : "";
-    item.innerHTML = `<span class="${stateClass}">${escapeHtml(milestone.title)}</span>${due}`;
+    item.innerHTML = `<span class="${stateClass}">${escapeHtml(milestone.title)}</span>${due}${renderProgressBar(milestoneProgress(milestone))}`;
     item.addEventListener("click", () => {
       selectedMilestoneId = milestone.id;
       showNewMilestoneForm = false;
@@ -475,7 +862,10 @@ function renderMilestoneList(): void {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
     loadMore.className = "load-more";
-    loadMore.textContent = `Load more (${milestones.length - visibleMilestones.length} remaining)`;
+    loadMore.textContent = t(
+      "Load more ({0} remaining)",
+      milestones.length - visibleMilestones.length,
+    );
     loadMore.addEventListener("click", () => {
       milestoneListPageSize += LIST_PAGE_SIZE;
       renderMilestoneList();
@@ -487,19 +877,19 @@ function renderMilestoneList(): void {
 function renderNewMilestoneForm(): void {
   const detail = byId<HTMLDivElement>("milestone-detail");
   detail.innerHTML = `
-    <h3>New Milestone</h3>
+    <h3>${t("New Milestone")}</h3>
 
-    <label for="new-milestone-title">Title</label>
+    <label for="new-milestone-title">${t("Title")}</label>
     <input id="new-milestone-title" type="text" />
 
-    <label for="new-milestone-description">Description</label>
+    <label for="new-milestone-description">${t("Description")}</label>
     <textarea id="new-milestone-description"></textarea>
 
-    <label for="new-milestone-due">Due date</label>
+    <label for="new-milestone-due">${t("Due date")}</label>
     <input id="new-milestone-due" type="date" />
 
-    <button id="new-milestone-create" type="button">Create</button>
-    <button id="new-milestone-cancel" type="button">Cancel</button>
+    <button id="new-milestone-create" type="button">${t("Create")}</button>
+    <button id="new-milestone-cancel" type="button">${t("Cancel")}</button>
   `;
 
   byId<HTMLButtonElement>("new-milestone-cancel").addEventListener("click", () => {
@@ -510,7 +900,7 @@ function renderNewMilestoneForm(): void {
   byId<HTMLButtonElement>("new-milestone-create").addEventListener("click", () => {
     const title = byId<HTMLInputElement>("new-milestone-title").value.trim();
     if (!title) {
-      showError("Title is required.");
+      showError(t("Title is required."));
       return;
     }
     const description = byId<HTMLTextAreaElement>("new-milestone-description").value;
@@ -528,7 +918,7 @@ function renderMilestoneDetail(): void {
   }
   const milestone = currentMilestones.find((candidate) => candidate.id === selectedMilestoneId);
   if (!milestone) {
-    detail.innerHTML = `<p>Select a milestone to view details.</p>`;
+    detail.innerHTML = `<p>${t("Select a milestone to view details.")}</p>`;
     return;
   }
 
@@ -538,27 +928,29 @@ function renderMilestoneDetail(): void {
   const closedCount = linkedIssues.length - openCount;
   detail.innerHTML = `
     <div class="meta">
-      <div class="meta-row"><span class="meta-key">Number</span><span class="meta-value">#${milestone.number}</span></div>
-      <div class="meta-row"><span class="meta-key">Link</span><span class="meta-value"><a href="${escapeAttr(safeHref(milestone.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(milestone.url)}</a></span></div>
-      <div class="meta-row"><span class="meta-key">Due</span><span class="meta-value">${formatDate(milestone.dueOn)}</span></div>
-      <div class="meta-row"><span class="meta-key">Issues</span><span class="meta-value">${openCount} open, ${closedCount} closed <button id="milestone-view-issues" type="button" class="assign-to-me">View issues</button></span></div>
-      <div class="meta-row"><span class="meta-key">Created</span><span class="meta-value">${formatDate(milestone.createdAt)}</span></div>
-      <div class="meta-row"><span class="meta-key">Updated</span><span class="meta-value">${formatDate(milestone.updatedAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Number")}</span><span class="meta-value">#${milestone.number}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Link")}</span><span class="meta-value"><a href="${escapeAttr(safeHref(milestone.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(milestone.url)}</a></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Due")}</span><span class="meta-value">${formatDate(milestone.dueOn)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Issues")}</span><span class="meta-value">${t("{0} open, {1} closed", openCount, closedCount)} <button id="milestone-view-issues" type="button" class="assign-to-me">${t("View issues")}</button></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Created")}</span><span class="meta-value">${formatDate(milestone.createdAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Updated")}</span><span class="meta-value">${formatDate(milestone.updatedAt)}</span></div>
     </div>
 
-    <label for="milestone-title">Title</label>
+    ${renderProgressBar(milestoneProgress(milestone))}
+
+    <label for="milestone-title">${t("Title")}</label>
     <input id="milestone-title" type="text" value="${escapeAttr(milestone.title)}" ${canWrite ? "" : "disabled"} />
 
-    <label for="milestone-state">State</label>
+    <label for="milestone-state">${t("State")}</label>
     <select id="milestone-state" ${canWrite ? "" : "disabled"}>
-      <option value="open" ${milestone.state === "open" ? "selected" : ""}>Open</option>
-      <option value="closed" ${milestone.state === "closed" ? "selected" : ""}>Closed</option>
+      <option value="open" ${milestone.state === "open" ? "selected" : ""}>${t("Open")}</option>
+      <option value="closed" ${milestone.state === "closed" ? "selected" : ""}>${t("Closed")}</option>
     </select>
 
-    <label for="milestone-description">Description</label>
+    <label for="milestone-description">${t("Description")}</label>
     <textarea id="milestone-description" ${canWrite ? "" : "disabled"}>${escapeHtml(milestone.description)}</textarea>
 
-    <label for="milestone-due-editor">Due date</label>
+    <label for="milestone-due-editor">${t("Due date")}</label>
     <input
       id="milestone-due-editor"
       type="date"
@@ -566,14 +958,13 @@ function renderMilestoneDetail(): void {
       ${canWrite ? "" : "disabled"}
     />
 
-    <button id="milestone-save" ${canWrite ? "" : "disabled"}>Save</button>
-    ${canWrite ? "" : '<p class="read-only-note">Your account does not have write access to milestones.</p>'}
+    <button id="milestone-save" ${canWrite ? "" : "disabled"}>${t("Save")}</button>
+    ${canWrite ? "" : `<p class="read-only-note">${t("Your account does not have write access to milestones.")}</p>`}
   `;
 
   byId<HTMLButtonElement>("milestone-view-issues").addEventListener("click", () => {
-    issueMilestoneFilter = milestone.id;
+    setIssueFilter({ ...EMPTY_FILTER, milestone: milestone.id });
     setActiveTab("issues");
-    renderIssueList();
   });
 
   if (canWrite) {
@@ -638,16 +1029,34 @@ function renderRepositoryPicker(options: RepositoryOptionView[]): void {
   }
 }
 
+/** A persistent drop-down to switch repository once one is chosen and the workspace has several. */
+function renderRepositorySwitcher(options: RepositoryOptionView[], selectedId: string): void {
+  const select = byId<HTMLSelectElement>("repository-switcher");
+  select.innerHTML = options
+    .map(
+      (option) =>
+        `<option value="${escapeAttr(option.id)}" ${option.id === selectedId ? "selected" : ""}>${escapeHtml(option.label)}</option>`,
+    )
+    .join("");
+  select.hidden = options.length < 2;
+}
+
+byId<HTMLSelectElement>("repository-switcher").addEventListener("change", (event) => {
+  post({ type: "selectRepository", id: (event.target as HTMLSelectElement).value });
+});
+
 function renderIssueLabelFilterOptions(): void {
   const select = byId<HTMLSelectElement>("issue-label-filter");
   const previousValue = select.value;
   select.innerHTML =
-    `<option value="">All labels</option>` +
+    `<option value="">${t("All labels")}</option>` +
     currentAvailableLabels
       .map((label) => `<option value="${escapeAttr(label)}">${escapeHtml(label)}</option>`)
       .join("");
   select.value = currentAvailableLabels.includes(previousValue) ? previousValue : "";
-  issueLabelFilter = select.value || null;
+  if ((select.value || null) !== issueFilter.label) {
+    issueFilter = { ...issueFilter, label: select.value || null };
+  }
 }
 
 function renderIssueAssigneeFilterOptions(): void {
@@ -655,54 +1064,418 @@ function renderIssueAssigneeFilterOptions(): void {
   const previousValue = select.value;
   const usernames = currentAvailableAssignableUsers;
   select.innerHTML =
-    `<option value="">All assignees</option><option value="@me">Assigned to me</option>` +
+    `<option value="">${t("All assignees")}</option><option value="@me">${t("Assigned to me")}</option>` +
     usernames
       .map((username) => `<option value="${escapeAttr(username)}">${escapeHtml(username)}</option>`)
       .join("");
   select.value = previousValue === "@me" || usernames.includes(previousValue) ? previousValue : "";
-  issueAssigneeFilter = select.value || null;
+  if ((select.value || null) !== issueFilter.assignee) {
+    issueFilter = { ...issueFilter, assignee: select.value || null };
+  }
 }
 
-function setActiveTab(tab: "issues" | "milestones"): void {
-  byId<HTMLButtonElement>("tab-issues").classList.toggle("active", tab === "issues");
-  byId<HTMLButtonElement>("tab-milestones").classList.toggle("active", tab === "milestones");
-  byId<HTMLDivElement>("view-issues").hidden = tab !== "issues";
-  byId<HTMLDivElement>("view-milestones").hidden = tab !== "milestones";
+/** Replaces the issue filter, resets paging, and re-renders the list and its controls. */
+function setIssueFilter(next: IssueFilter): void {
+  issueFilter = next;
+  issueListPageSize = LIST_PAGE_SIZE;
+  syncFilterControls();
+  renderIssueList();
+  renderBoardIfVisible();
 }
+
+function persistListPrefs(): void {
+  uiPrefs = { ...uiPrefs, issueSort, issueGroup };
+  post({ type: "saveUiPrefs", prefs: uiPrefs });
+}
+
+function persistSavedFilters(): void {
+  uiPrefs = { ...uiPrefs, savedFilters };
+  post({ type: "saveUiPrefs", prefs: uiPrefs });
+}
+
+/** Makes every filter control reflect {@link issueFilter} and the saved-filter list. */
+function syncFilterControls(): void {
+  byId<HTMLInputElement>("issue-search").value = issueFilter.query;
+  byId<HTMLSelectElement>("issue-label-filter").value = issueFilter.label ?? "";
+  byId<HTMLSelectElement>("issue-assignee-filter").value = issueFilter.assignee ?? "";
+  byId<HTMLSelectElement>("issue-state-filter").value = issueFilter.state;
+
+  const milestoneSelect = byId<HTMLSelectElement>("issue-milestone-filter");
+  milestoneSelect.innerHTML =
+    `<option value="">${t("All milestones")}</option><option value="${NO_MILESTONE}">${t("No milestone")}</option>` +
+    currentMilestones
+      .map(
+        (milestone) =>
+          `<option value="${escapeAttr(milestone.id)}">${escapeHtml(milestone.title)}</option>`,
+      )
+      .join("");
+  milestoneSelect.value = issueFilter.milestone ?? "";
+
+  const sortSelect = byId<HTMLSelectElement>("issue-sort");
+  sortSelect.innerHTML = ISSUE_SORTS.map(
+    (entry) => `<option value="${entry}">${escapeHtml(describeSort(entry, t))}</option>`,
+  ).join("");
+  sortSelect.value = issueSort;
+  const groupSelect = byId<HTMLSelectElement>("issue-group");
+  groupSelect.innerHTML = ISSUE_GROUPS.map(
+    (entry) => `<option value="${entry}">${escapeHtml(describeGroup(entry, t))}</option>`,
+  ).join("");
+  groupSelect.value = issueGroup;
+
+  const matching = [...PRESET_FILTERS, ...savedFilters].find((entry) =>
+    sameFilter(entry.filter, issueFilter),
+  );
+  const savedSelect = byId<HTMLSelectElement>("issue-saved-filters");
+  const option = (entry: SavedFilter): string =>
+    `<option value="${escapeAttr(entry.name)}">${escapeHtml(describePreset(entry.name, t))}</option>`;
+  savedSelect.innerHTML =
+    `<option value="">${t("Saved filters…")}</option>` +
+    `<optgroup label="${escapeAttr(t("Built-in"))}">${PRESET_FILTERS.map(option).join("")}</optgroup>` +
+    (savedFilters.length > 0
+      ? `<optgroup label="${escapeAttr(t("Yours"))}">${savedFilters.map(option).join("")}</optgroup>`
+      : "");
+  savedSelect.value = matching?.name ?? "";
+  byId<HTMLButtonElement>("issue-filter-delete").hidden =
+    !matching || !savedFilters.some((entry) => entry.name === matching.name);
+}
+
+const SETTING_GROUP_ORDER = ["connection", "branches", "automation", "ai", "editor"];
+
+let settingEntries: SettingEntryView[] = [];
+let previewTimer: number | undefined;
+
+function previewSample(): { title: string; number: number; labels: string[] } {
+  const issue = currentIssues[0];
+  return issue
+    ? { title: issue.title, number: issue.number, labels: [...issue.labels] }
+    : { title: "Add dark mode", number: 42, labels: ["enhancement"] };
+}
+
+function requestBranchPreview(pattern: string): void {
+  window.clearTimeout(previewTimer);
+  previewTimer = window.setTimeout(() => {
+    post({ type: "previewBranchName", pattern, sample: previewSample() });
+  }, 200);
+}
+
+/** The value as text for an input; objects (never expected) render empty rather than "[object Object]". */
+function settingText(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function renderSettingControl(entry: SettingEntryView): string {
+  const id = `setting-${entry.key}`;
+  const labelledBy = `aria-describedby="${id}-hint"`;
+  switch (entry.kind.type) {
+    case "boolean":
+      return `<input id="${id}" type="checkbox" ${entry.value === true ? "checked" : ""} ${labelledBy} />`;
+    case "number":
+      return `<input id="${id}" type="number" min="${entry.kind.min}" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
+    case "enum":
+      return `<select id="${id}" ${labelledBy}>${entry.kind.values
+        .map(
+          (option) =>
+            `<option value="${escapeAttr(option)}" ${entry.value === option ? "selected" : ""}>${escapeHtml(option)}</option>`,
+        )
+        .join("")}</select>`;
+    case "list":
+      return `<textarea id="${id}" rows="4" ${labelledBy}>${escapeHtml(
+        Array.isArray(entry.value)
+          ? entry.value.filter((line) => typeof line === "string").join("\n")
+          : "",
+      )}</textarea>`;
+    case "string":
+      return `<input id="${id}" type="text" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
+  }
+}
+
+function renderSettings(): void {
+  const container = byId<HTMLDivElement>("settings");
+  const focusedId = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
+  const groups = SETTING_GROUP_ORDER.map((group) =>
+    settingEntries.filter((entry) => entry.group === group),
+  ).filter((entries) => entries.length > 0);
+
+  container.innerHTML = groups
+    .map(
+      (
+        entries,
+      ) => `<section class="settings-group" aria-labelledby="settings-heading-${entries[0].group}">
+        <h3 id="settings-heading-${entries[0].group}">${escapeHtml(entries[0].groupLabel)}</h3>
+        ${entries
+          .map(
+            (entry) => `<div class="setting-row">
+              <label for="setting-${entry.key}">${escapeHtml(entry.label)}</label>
+              <span class="setting-scope">${escapeHtml(entry.scope === "workspace" ? t("Saved in the workspace") : t("Saved in your user settings"))}</span>
+              ${renderSettingControl(entry)}
+              ${entry.isDefault ? "" : `<button type="button" class="tab setting-reset" data-key="${escapeAttr(entry.key)}">${escapeHtml(t("Reset to default"))}</button>`}
+              <p id="setting-${entry.key}-hint" class="read-only-note">${escapeHtml(entry.hint)}</p>
+              ${entry.key === "branchNamePattern" ? `<div id="branch-preview" class="branch-preview" aria-live="polite"></div>` : ""}
+            </div>`,
+          )
+          .join("")}
+      </section>`,
+    )
+    .join("");
+
+  for (const entry of settingEntries) {
+    const control = document.getElementById(`setting-${entry.key}`) as
+      HTMLInputElement | HTMLSelectElement | null;
+    control?.addEventListener("change", () => {
+      let value: unknown;
+      if (entry.kind.type === "boolean") {
+        value = (control as HTMLInputElement).checked;
+      } else if (entry.kind.type === "list") {
+        value = control.value.split("\n");
+      } else if (entry.kind.type === "number") {
+        value = control.value.trim() === "" ? Number.NaN : Number(control.value);
+      } else {
+        value = control.value;
+      }
+      post({ type: "updateSetting", key: entry.key, value });
+    });
+    if (entry.key === "branchNamePattern" && control) {
+      control.addEventListener("input", () => requestBranchPreview(control.value));
+      requestBranchPreview(control.value);
+    }
+  }
+  container.querySelectorAll<HTMLButtonElement>(".setting-reset").forEach((button) => {
+    button.addEventListener("click", () =>
+      post({ type: "updateSetting", key: button.dataset.key ?? "", value: null }),
+    );
+  });
+  if (focusedId) {
+    document.getElementById(focusedId)?.focus();
+  }
+}
+
+function renderBranchPreview(message: { example: string; warnings: string[] }): void {
+  const box = document.getElementById("branch-preview");
+  if (!box) {
+    return;
+  }
+  box.innerHTML = `<p>${escapeHtml(t("Example for the first issue:"))} <code>${escapeHtml(message.example)}</code></p>${
+    message.warnings.length > 0
+      ? `<ul class="branch-warnings">${message.warnings.map((warning) => `<li>&#9888; ${escapeHtml(warning)}</li>`).join("")}</ul>`
+      : ""
+  }`;
+}
+
+type TabName = "issues" | "milestones" | "board" | "settings";
+
+function activeTab(): TabName {
+  for (const tab of ["milestones", "board", "settings"] as const) {
+    if (byId<HTMLButtonElement>(`tab-${tab}`).classList.contains("active")) {
+      return tab;
+    }
+  }
+  return "issues";
+}
+
+function setActiveTab(tab: TabName): void {
+  for (const name of ["issues", "milestones", "board", "settings"] as const) {
+    byId<HTMLButtonElement>(`tab-${name}`).classList.toggle("active", tab === name);
+    byId<HTMLButtonElement>(`tab-${name}`).setAttribute("aria-selected", String(tab === name));
+    byId<HTMLDivElement>(`view-${name}`).hidden = tab !== name;
+  }
+  if (tab === "board") {
+    renderBoard();
+  }
+  if (tab === "settings") {
+    post({ type: "requestSettings" });
+  }
+}
+
+function renderBoardIfVisible(): void {
+  if (activeTab() === "board") {
+    renderBoard();
+  }
+}
+
+/** Applies a board move, enforcing write access client-side too (the host re-checks). */
+function moveIssueToColumn(issueId: string, column: BoardColumnId): void {
+  const issue = currentIssues.find((candidate) => candidate.id === issueId);
+  if (!issue) {
+    return;
+  }
+  if (!currentCapabilities.canWriteIssues) {
+    showError(t("Your account does not have write access to issues."));
+    return;
+  }
+  const patch = planBoardMove(issue, column);
+  if (patch) {
+    post({ type: "updateIssue", id: issue.id, patch });
+  }
+}
+
+function renderBoard(): void {
+  const container = byId<HTMLDivElement>("board");
+  container.innerHTML = "";
+  const canWrite = currentCapabilities.canWriteIssues;
+  const visible = sortIssues(
+    filterIssues(currentIssues, issueFilter, currentUser?.username ?? null),
+    issueSort,
+  );
+  byId<HTMLParagraphElement>("board-note").textContent =
+    (visible.length === 1
+      ? t("1 issue shown. The filters of the Issues tab apply.")
+      : t("{0} issues shown. The filters of the Issues tab apply.", visible.length)) +
+    (canWrite ? ` ${t("Drag a card, or use its Move menu, to change its status.")}` : "");
+
+  for (const column of buildBoard(visible, t)) {
+    const section = document.createElement("section");
+    section.className = "board-column";
+    section.setAttribute("aria-label", t("{0}, {1} issues", column.title, column.issues.length));
+    const header = document.createElement("h3");
+    header.textContent = `${column.title} (${column.issues.length})`;
+    section.appendChild(header);
+
+    section.addEventListener("dragover", (event) => {
+      if (canWrite) {
+        event.preventDefault();
+        section.classList.add("drop-target");
+      }
+    });
+    section.addEventListener("dragleave", () => section.classList.remove("drop-target"));
+    section.addEventListener("drop", (event) => {
+      event.preventDefault();
+      section.classList.remove("drop-target");
+      const issueId = event.dataTransfer?.getData("text/plain");
+      if (issueId) {
+        moveIssueToColumn(issueId, column.id);
+      }
+    });
+
+    for (const issue of column.issues) {
+      const card = document.createElement("article");
+      card.className = "board-card";
+      card.draggable = canWrite;
+      card.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("text/plain", issue.id);
+      });
+
+      const title = document.createElement("button");
+      title.type = "button";
+      title.className = "board-card-title";
+      title.innerHTML = `<span class="number">#${issue.number}</span> ${escapeHtml(issue.title)}`;
+      title.addEventListener("click", () => {
+        selectedIssueId = issue.id;
+        showNewIssueForm = false;
+        setActiveTab("issues");
+        renderIssueList();
+        renderIssueDetail();
+      });
+      card.appendChild(title);
+      card.insertAdjacentHTML("beforeend", renderLabelBadges(issue.labels));
+
+      const move = document.createElement("select");
+      move.className = "board-card-move";
+      move.disabled = !canWrite;
+      move.setAttribute("aria-label", t("Move issue #{0}", issue.number));
+      move.innerHTML =
+        `<option value="">${t("Move to…")}</option>` +
+        BOARD_COLUMNS.filter((target) => target !== column.id)
+          .map(
+            (target) =>
+              `<option value="${target}">${escapeHtml(describeColumn(target, t))}</option>`,
+          )
+          .join("");
+      move.addEventListener("change", () => {
+        if (move.value) {
+          moveIssueToColumn(issue.id, move.value as BoardColumnId);
+        }
+      });
+      card.appendChild(move);
+      section.appendChild(card);
+    }
+    container.appendChild(section);
+  }
+  applyLabelColors(container);
+}
+
+/**
+ * The state options' texts are set here rather than in the page shell: "Open"
+ * as a state ("Ouvert") and "Open" as a button ("Ouvrir") are different words
+ * in French, and the shell is translated by the host with one table.
+ */
+function localizeStateOptions(): void {
+  for (const id of ["issue-state-filter", "milestone-state-filter"]) {
+    for (const option of Array.from(byId<HTMLSelectElement>(id).options)) {
+      if (option.value === "open") {
+        option.textContent = t("Open");
+      } else if (option.value === "closed") {
+        option.textContent = t("Closed");
+      }
+    }
+  }
+}
+localizeStateOptions();
 
 byId<HTMLButtonElement>("tab-issues").addEventListener("click", () => {
-  issueMilestoneFilter = null;
-  issueLabelFilter = null;
-  issueAssigneeFilter = null;
-  issueStateFilter = "all";
-  issueSearchQuery = "";
-  issueListPageSize = LIST_PAGE_SIZE;
-  byId<HTMLSelectElement>("issue-label-filter").value = "";
-  byId<HTMLSelectElement>("issue-assignee-filter").value = "";
-  byId<HTMLSelectElement>("issue-state-filter").value = "all";
-  byId<HTMLInputElement>("issue-search").value = "";
+  setIssueFilter(EMPTY_FILTER);
   setActiveTab("issues");
-  renderIssueList();
 });
 byId<HTMLInputElement>("issue-search").addEventListener("input", (event) => {
-  issueSearchQuery = (event.target as HTMLInputElement).value;
-  issueListPageSize = LIST_PAGE_SIZE;
-  renderIssueList();
+  setIssueFilter({ ...issueFilter, query: (event.target as HTMLInputElement).value });
 });
 byId<HTMLSelectElement>("issue-label-filter").addEventListener("change", (event) => {
-  issueLabelFilter = (event.target as HTMLSelectElement).value || null;
-  issueListPageSize = LIST_PAGE_SIZE;
-  renderIssueList();
+  setIssueFilter({ ...issueFilter, label: (event.target as HTMLSelectElement).value || null });
 });
 byId<HTMLSelectElement>("issue-assignee-filter").addEventListener("change", (event) => {
-  issueAssigneeFilter = (event.target as HTMLSelectElement).value || null;
-  issueListPageSize = LIST_PAGE_SIZE;
-  renderIssueList();
+  setIssueFilter({ ...issueFilter, assignee: (event.target as HTMLSelectElement).value || null });
 });
 byId<HTMLSelectElement>("issue-state-filter").addEventListener("change", (event) => {
-  issueStateFilter = (event.target as HTMLSelectElement).value as "all" | "open" | "closed";
-  issueListPageSize = LIST_PAGE_SIZE;
+  setIssueFilter({
+    ...issueFilter,
+    state: (event.target as HTMLSelectElement).value as IssueFilter["state"],
+  });
+});
+byId<HTMLSelectElement>("issue-milestone-filter").addEventListener("change", (event) => {
+  setIssueFilter({ ...issueFilter, milestone: (event.target as HTMLSelectElement).value || null });
+});
+byId<HTMLSelectElement>("issue-sort").addEventListener("change", (event) => {
+  issueSort = (event.target as HTMLSelectElement).value as IssueSort;
+  persistListPrefs();
   renderIssueList();
+});
+byId<HTMLSelectElement>("issue-group").addEventListener("change", (event) => {
+  issueGroup = (event.target as HTMLSelectElement).value as IssueGroup;
+  persistListPrefs();
+  renderIssueList();
+});
+byId<HTMLSelectElement>("issue-saved-filters").addEventListener("change", (event) => {
+  const name = (event.target as HTMLSelectElement).value;
+  const chosen = [...PRESET_FILTERS, ...savedFilters].find((entry) => entry.name === name);
+  if (chosen) {
+    setIssueFilter(chosen.filter);
+  }
+});
+byId<HTMLButtonElement>("issue-filter-save").addEventListener("click", () => {
+  byId<HTMLSpanElement>("saved-filter-form").hidden = false;
+  byId<HTMLInputElement>("saved-filter-name").focus();
+});
+byId<HTMLButtonElement>("saved-filter-cancel").addEventListener("click", () => {
+  byId<HTMLSpanElement>("saved-filter-form").hidden = true;
+  byId<HTMLInputElement>("saved-filter-name").value = "";
+});
+byId<HTMLButtonElement>("saved-filter-confirm").addEventListener("click", () => {
+  const input = byId<HTMLInputElement>("saved-filter-name");
+  const next = upsertSavedFilter(savedFilters, input.value, issueFilter);
+  if (!next) {
+    showError(t("Enter a name that is not one of the built-in filters."));
+    return;
+  }
+  savedFilters = next;
+  persistSavedFilters();
+  input.value = "";
+  byId<HTMLSpanElement>("saved-filter-form").hidden = true;
+  syncFilterControls();
+});
+byId<HTMLButtonElement>("issue-filter-delete").addEventListener("click", () => {
+  const name = byId<HTMLSelectElement>("issue-saved-filters").value;
+  savedFilters = removeSavedFilter(savedFilters, name);
+  persistSavedFilters();
+  syncFilterControls();
 });
 byId<HTMLSelectElement>("milestone-state-filter").addEventListener("change", (event) => {
   milestoneStateFilter = (event.target as HTMLSelectElement).value as "all" | "open" | "closed";
@@ -712,6 +1485,8 @@ byId<HTMLSelectElement>("milestone-state-filter").addEventListener("change", (ev
 byId<HTMLButtonElement>("tab-milestones").addEventListener("click", () =>
   setActiveTab("milestones"),
 );
+byId<HTMLButtonElement>("tab-board").addEventListener("click", () => setActiveTab("board"));
+byId<HTMLButtonElement>("tab-settings").addEventListener("click", () => setActiveTab("settings"));
 byId<HTMLButtonElement>("issue-new").addEventListener("click", () => {
   selectedIssueId = null;
   showNewIssueForm = true;
@@ -724,8 +1499,93 @@ byId<HTMLButtonElement>("milestone-new").addEventListener("click", () => {
   renderMilestoneList();
   renderMilestoneDetail();
 });
-byId<HTMLButtonElement>("refresh-button").addEventListener("click", () => {
+function requestRefresh(): void {
+  setRefreshing(true);
   post({ type: "requestState", forceRefresh: true });
+}
+byId<HTMLButtonElement>("refresh-button").addEventListener("click", requestRefresh);
+byId<HTMLButtonElement>("cache-banner-refresh").addEventListener("click", requestRefresh);
+window.setInterval(updateCacheBanner, 30_000);
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
+}
+
+function toggleShortcutHelp(force?: boolean): void {
+  const help = byId<HTMLDivElement>("shortcut-help");
+  help.hidden = force === undefined ? !help.hidden : !force;
+  if (!help.hidden) {
+    help.innerHTML = `<h3>${t("Keyboard shortcuts")}</h3><dl>${shortcutHelp(t)
+      .map(
+        (entry) =>
+          `<dt><kbd>${escapeHtml(entry.keys)}</kbd></dt><dd>${escapeHtml(entry.description)}</dd>`,
+      )
+      .join("")}</dl><p>${t("Press {0} to close.", "<kbd>Esc</kbd>")}</p>`;
+  }
+}
+
+function selectIssueByKeyboard(direction: "next" | "previous"): void {
+  const id = moveSelection(visibleIssueIds, selectedIssueId, direction);
+  if (id === null || id === selectedIssueId) {
+    return;
+  }
+  selectedIssueId = id;
+  showNewIssueForm = false;
+  renderIssueList();
+  renderIssueDetail();
+  document
+    .querySelector<HTMLElement>(`#issue-list .item[data-issue-id="${CSS.escape(id)}"]`)
+    ?.scrollIntoView({ block: "nearest" });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    toggleShortcutHelp(false);
+    return;
+  }
+  const action = shortcutFor(event, isEditableTarget(event.target));
+  const issuesVisible = !byId<HTMLDivElement>("view-issues").hidden;
+  switch (action) {
+    case "next":
+    case "previous":
+      if (issuesVisible) {
+        event.preventDefault();
+        selectIssueByKeyboard(action);
+      }
+      return;
+    case "edit":
+      if (issuesVisible && selectedIssueId !== null) {
+        const title = document.getElementById("issue-title") as HTMLInputElement | null;
+        if (title && !title.disabled) {
+          event.preventDefault();
+          title.focus();
+          title.select();
+        }
+      }
+      return;
+    case "search":
+      if (issuesVisible) {
+        event.preventDefault();
+        byId<HTMLInputElement>("issue-search").focus();
+      }
+      return;
+    case "refresh":
+      requestRefresh();
+      return;
+    case "help":
+      toggleShortcutHelp();
+      return;
+    case null:
+      return;
+  }
 });
 
 window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
@@ -733,11 +1593,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
   if (message.type === "state") {
     clearError();
     byId<HTMLDivElement>("repository-picker").hidden = true;
-    setActiveTab(
-      byId<HTMLButtonElement>("tab-milestones").classList.contains("active")
-        ? "milestones"
-        : "issues",
-    );
+    setActiveTab(activeTab());
 
     const snapshot: StateSnapshot = {
       issues: message.issues,
@@ -746,7 +1602,16 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
       currentUser: message.currentUser,
       availableLabels: message.availableLabels,
       availableAssignableUsers: message.availableAssignableUsers,
+      labelColors: message.labelColors,
     };
+    if (!templatesRequested) {
+      templatesRequested = true;
+      post({ type: "requestIssueTemplates" });
+    }
+    lastFetchedAt = message.dataFetchedAt;
+    updateCacheBanner();
+    setRefreshing(false);
+    byId<HTMLDivElement>("issue-list").removeAttribute("aria-busy");
     if (!hasStateChanged(lastState, snapshot)) {
       return;
     }
@@ -758,11 +1623,14 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     currentUser = message.currentUser;
     currentAvailableLabels = message.availableLabels;
     currentAvailableAssignableUsers = message.availableAssignableUsers;
+    currentLabelColors = message.labelColors;
     renderIssueLabelFilterOptions();
     renderIssueAssigneeFilterOptions();
+    syncFilterControls();
     byId<HTMLButtonElement>("issue-new").disabled = !currentCapabilities.canWriteIssues;
     byId<HTMLButtonElement>("milestone-new").disabled = !currentCapabilities.canWriteMilestones;
     renderIssueList();
+    renderBoardIfVisible();
     // Skip re-rendering the create form while it's open — the "state"
     // handler runs on every refresh/edit, and re-rendering would wipe
     // out an in-progress, unsaved draft (see #49).
@@ -775,14 +1643,51 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     }
   } else if (message.type === "repositoryOptions") {
     clearError();
-    renderRepositoryPicker(message.options);
+    if (message.selectedId === undefined) {
+      renderRepositoryPicker(message.options);
+    } else {
+      renderRepositorySwitcher(message.options, message.selectedId);
+    }
   } else if (message.type === "selectIssue") {
     selectedIssueId = message.id;
     showNewIssueForm = false;
-    issueMilestoneFilter = null;
+    setIssueFilter({ ...issueFilter, milestone: null });
     setActiveTab("issues");
-    renderIssueList();
     renderIssueDetail();
+  } else if (message.type === "settings") {
+    settingEntries = message.entries;
+    renderSettings();
+  } else if (message.type === "branchNamePreview") {
+    renderBranchPreview(message);
+  } else if (message.type === "comments") {
+    commentRequestsInFlight.delete(message.issueId);
+    commentsByIssue.set(message.issueId, message.comments);
+    commentsFetchedAtCount.set(
+      message.issueId,
+      currentIssues.find((candidate) => candidate.id === message.issueId)?.commentsCount ??
+        message.comments.length,
+    );
+    if (commentSubmitIssueId === message.issueId) {
+      commentSubmitIssueId = null;
+      const box = document.getElementById("comment-body") as HTMLTextAreaElement | null;
+      if (box) {
+        box.value = "";
+      }
+      const button = document.getElementById("comment-add") as HTMLButtonElement | null;
+      if (button) {
+        button.disabled = false;
+      }
+    }
+    renderComments(message.issueId);
+  } else if (message.type === "issueTemplates") {
+    issueTemplates = message.templates;
+  } else if (message.type === "uiPrefs") {
+    uiPrefs = { ...message.prefs };
+    savedFilters = readSavedFilters(uiPrefs);
+    seenComments = readSeenComments(uiPrefs);
+    ({ sort: issueSort, group: issueGroup } = readListPrefs(uiPrefs));
+    syncFilterControls();
+    renderIssueList();
   } else if (message.type === "openNewIssueForm") {
     selectedIssueId = null;
     showNewIssueForm = true;
@@ -798,7 +1703,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
   } else if (message.type === "actionSuccess") {
     showToast(message.message);
   } else if (message.type === "error") {
-    showError(message.message);
+    showError(message.message, message.authError === true);
   }
 });
 

@@ -6,8 +6,10 @@ import type {
   IAuthenticatedUser,
   IProjectProvider,
 } from "../core/providers/project-provider.interface";
-import { assertCanWrite } from "../core/providers/project-provider.interface";
-import type { InboundMessage, OutboundMessage } from "./messages";
+import { assertCanWrite, hasFetchTimestamps } from "../core/providers/project-provider.interface";
+import { isAuthError } from "../core/auth/is-auth-error";
+import type { SettingEntry } from "../core/settings/settings-schema";
+import type { InboundMessage, IssueTemplateView, OutboundMessage, UiPrefsView } from "./messages";
 
 /** Called when an issue update crosses a recognized lifecycle transition. */
 export type IssueTransitionHandler = (issue: IIssue, transition: IssueTransition) => void;
@@ -23,6 +25,26 @@ export type NewAssignmentHandler = (issue: IIssue) => void;
  * `handleMessage`'s catch turns into an `error` message.
  */
 export type CreateBranchRequestHandler = (issue: IIssue) => Promise<string | null>;
+
+/** Persists the webview's UI preferences (backed by `workspaceState` in the extension host). */
+export interface UiPrefsStore {
+  get(): UiPrefsView;
+  set(prefs: UiPrefsView): void | PromiseLike<void>;
+}
+
+/**
+ * What the settings page needs from the host: the current settings, a way
+ * to change one (resolving to an error text, or `null` on success; a `null`
+ * value resets the setting), and the live branch-name preview.
+ */
+export interface SettingsBridge {
+  read(): SettingEntry[];
+  write(key: string, value: unknown): Promise<string | null>;
+  previewBranchName(
+    pattern: string,
+    sample: { title: string; number: number; labels: readonly string[] },
+  ): { example: string; warnings: string[] };
+}
 
 /**
  * Drives the central panel's state: fetches issues/milestones/capabilities
@@ -58,12 +80,85 @@ export class PanelController {
     private readonly onCreateBranchRequest?: CreateBranchRequestHandler,
     private readonly onNewAssignment?: NewAssignmentHandler,
     private readonly onError?: (error: unknown) => void,
+    private readonly uiPrefsStore?: UiPrefsStore,
+    private readonly onReconnectRequest?: () => void,
+    private readonly loadIssueTemplates?: () => Promise<readonly IssueTemplateView[]>,
+    private readonly settings?: SettingsBridge,
   ) {}
 
   async handleMessage(message: InboundMessage): Promise<void> {
     try {
       switch (message.type) {
+        case "requestSettings":
+          if (this.settings) {
+            this.postMessage({ type: "settings", entries: this.settings.read() });
+          }
+          return;
+        case "updateSetting": {
+          if (!this.settings) {
+            return;
+          }
+          const failure = await this.settings.write(message.key, message.value);
+          if (failure) {
+            this.postMessage({ type: "error", message: failure });
+            return;
+          }
+          this.postMessage({ type: "actionSuccess", message: "Setting saved." });
+          this.postMessage({ type: "settings", entries: this.settings.read() });
+          return;
+        }
+        case "previewBranchName":
+          if (this.settings) {
+            this.postMessage({
+              type: "branchNamePreview",
+              pattern: message.pattern,
+              ...this.settings.previewBranchName(message.pattern, message.sample),
+            });
+          }
+          return;
+        case "requestComments":
+          this.postMessage({
+            type: "comments",
+            issueId: message.issueId,
+            comments: await this.provider.listComments(message.issueId),
+          });
+          return;
+        case "addComment": {
+          const body = message.body.trim();
+          if (!body) {
+            this.postMessage({ type: "error", message: "A comment cannot be empty." });
+            return;
+          }
+          await this.guardWrite("canWriteIssues");
+          await this.provider.addComment(message.issueId, body);
+          this.postMessage({ type: "actionSuccess", message: "Comment added." });
+          this.postMessage({
+            type: "comments",
+            issueId: message.issueId,
+            comments: await this.provider.listComments(message.issueId),
+          });
+          // The issue's comment count changed too.
+          await this.sendState();
+          return;
+        }
+        case "requestIssueTemplates":
+          if (this.loadIssueTemplates) {
+            this.postMessage({
+              type: "issueTemplates",
+              templates: await this.loadIssueTemplates().catch(() => []),
+            });
+          }
+          return;
+        case "reconnect":
+          this.onReconnectRequest?.();
+          return;
+        case "saveUiPrefs":
+          await this.uiPrefsStore?.set(message.prefs);
+          return;
         case "requestState":
+          if (this.uiPrefsStore) {
+            this.postMessage({ type: "uiPrefs", prefs: this.uiPrefsStore.get() });
+          }
           await this.sendState(message.forceRefresh ? { forceRefresh: true } : undefined);
           return;
         case "createIssue":
@@ -111,6 +206,7 @@ export class PanelController {
       this.postMessage({
         type: "error",
         message: error instanceof Error ? error.message : String(error),
+        ...(isAuthError(error) ? { authError: true } : {}),
       });
     }
   }
@@ -166,6 +262,7 @@ export class PanelController {
       currentUser,
       availableLabels,
       availableAssignableUsers,
+      labelColors,
     ] = await Promise.all([
       this.provider.getCapabilities(options),
       this.provider.listIssues(options),
@@ -173,6 +270,8 @@ export class PanelController {
       this.getCurrentUser(),
       this.provider.listLabels(options),
       this.provider.listAssignableUsers(options),
+      // Colours only decorate badges; never let them fail the whole state.
+      this.provider.listLabelColors(options).catch((): Record<string, string> => ({})),
     ]);
     this.detectAndNotifyTransitions(issues, currentUser.username);
     this.postMessage({
@@ -183,6 +282,10 @@ export class PanelController {
       currentUser,
       availableLabels,
       availableAssignableUsers,
+      labelColors,
+      ...(hasFetchTimestamps(this.provider) && this.provider.getIssuesFetchedAt() !== undefined
+        ? { dataFetchedAt: this.provider.getIssuesFetchedAt() }
+        : {}),
     });
   }
 }

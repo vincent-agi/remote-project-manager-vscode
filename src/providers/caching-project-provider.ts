@@ -1,4 +1,5 @@
 import { TtlCache } from "../core/cache/ttl-cache";
+import type { IComment } from "../core/models/comment.model";
 import type { IIssue } from "../core/models/issue.model";
 import type { IMilestone } from "../core/models/milestone.model";
 import type {
@@ -6,6 +7,7 @@ import type {
   CreateMilestoneInput,
   FetchOptions,
   IAuthenticatedUser,
+  IFetchTimestamps,
   IProjectProvider,
   ProviderCapabilities,
   UpdateIssueInput,
@@ -17,6 +19,7 @@ const MILESTONES_KEY = "milestones";
 const CAPABILITIES_KEY = "capabilities";
 const LABELS_KEY = "labels";
 const ASSIGNABLE_USERS_KEY = "assignableUsers";
+const LABEL_COLORS_KEY = "labelColors";
 
 /**
  * Decorates any {@link IProjectProvider} with a short TTL cache over its
@@ -30,9 +33,10 @@ const ASSIGNABLE_USERS_KEY = "assignableUsers";
  * edit is never stale — trading one extra network round trip for
  * correctness, which matters more than the cache hit rate here.
  */
-export class CachingProjectProvider implements IProjectProvider {
+export class CachingProjectProvider implements IProjectProvider, IFetchTimestamps {
   private readonly cache: TtlCache<unknown>;
   private readonly inFlight = new Map<string, Promise<unknown>>();
+  private issuesFetchedAt: number | undefined;
 
   constructor(
     private readonly inner: IProjectProvider,
@@ -66,6 +70,9 @@ export class CachingProjectProvider implements IProjectProvider {
     const promise = fetcher()
       .then((value) => {
         this.cache.set(key, value);
+        if (key === ISSUES_KEY) {
+          this.issuesFetchedAt = Date.now();
+        }
         return value;
       })
       .finally(() => {
@@ -73,6 +80,10 @@ export class CachingProjectProvider implements IProjectProvider {
       });
     this.inFlight.set(key, promise);
     return promise;
+  }
+
+  getIssuesFetchedAt(): number | undefined {
+    return this.issuesFetchedAt;
   }
 
   getCurrentUser(): Promise<IAuthenticatedUser> {
@@ -93,6 +104,18 @@ export class CachingProjectProvider implements IProjectProvider {
 
   async createIssue(input: CreateIssueInput): Promise<IIssue> {
     const result = await this.inner.createIssue(input);
+    this.cache.invalidate(ISSUES_KEY);
+    return result;
+  }
+
+  /** Comments are read straight through: they change often and are fetched one issue at a time. */
+  listComments(issueId: string): Promise<readonly IComment[]> {
+    return this.inner.listComments(issueId);
+  }
+
+  /** A new comment changes the issue's comment count, so the cached issue list is stale. */
+  async addComment(issueId: string, body: string): Promise<IComment> {
+    const result = await this.inner.addComment(issueId, body);
     this.cache.invalidate(ISSUES_KEY);
     return result;
   }
@@ -125,6 +148,10 @@ export class CachingProjectProvider implements IProjectProvider {
 
   listLabels(options?: FetchOptions): Promise<readonly string[]> {
     return this.cached(LABELS_KEY, options, () => this.inner.listLabels());
+  }
+
+  listLabelColors(options?: FetchOptions): Promise<Readonly<Record<string, string>>> {
+    return this.cached(LABEL_COLORS_KEY, options, () => this.inner.listLabelColors());
   }
 
   listAssignableUsers(options?: FetchOptions): Promise<readonly string[]> {
