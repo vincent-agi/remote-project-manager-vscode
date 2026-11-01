@@ -1,6 +1,10 @@
 .vscode/**
 .github/**
 src/**
+node_modules/**
+dist/core/**
+dist/providers/**
+dist/webview/**
 test/**
 test-integration/**
 docs/adr/**

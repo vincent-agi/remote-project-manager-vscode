@@ -413,7 +413,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "package": "npm run compile && vsce package"
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --sourcemap --outfile=dist/extension.js",
+    "package": "npm run compile && npm run bundle && vsce package --no-dependencies"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -423,6 +424,7 @@
     "@types/vscode": "^1.85.0",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "mocha": "^12.0.2",
