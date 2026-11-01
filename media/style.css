@@ -714,3 +714,33 @@ kbd {
   stroke: var(--vscode-terminal-ansiMagenta);
   fill: var(--vscode-terminal-ansiMagenta);
 }
+
+:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.item:focus-visible {
+  outline-offset: -1px;
+}
+
+.field-heading {
+  display: block;
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+@media (forced-colors: active) {
+  .badge {
+    border: 1px solid CanvasText;
+  }
+
+  .progress::-webkit-progress-value {
+    background-color: Highlight;
+  }
+
+  .graph-svg line,
+  .graph-svg .node {
+    stroke: CanvasText;
+  }
+}

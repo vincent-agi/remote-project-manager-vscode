@@ -7,6 +7,7 @@
 import { hasStateChanged } from "./state-diff.js";
 import { BOARD_COLUMNS, buildBoard, planBoardMove, type BoardColumnId } from "./board-model.js";
 import { describeCacheAge } from "./cache-age.js";
+import { readableBadgeColors } from "./contrast.js";
 import { markSeen, readSeenComments, unseenComments, type SeenComments } from "./comment-state.js";
 import { renderMarkdown } from "./markdown.js";
 import { enhanceMarkdownEditor } from "./markdown-editor.js";
@@ -104,6 +105,7 @@ interface StateSnapshot {
   currentUser: AuthenticatedUser;
   availableLabels: string[];
   availableAssignableUsers: string[];
+  labelColors: Record<string, string>;
 }
 
 type OutboundMessage =
@@ -115,6 +117,7 @@ type OutboundMessage =
       currentUser: AuthenticatedUser;
       availableLabels: string[];
       availableAssignableUsers: string[];
+      labelColors: Record<string, string>;
       dataFetchedAt?: number;
     }
   | { type: "uiPrefs"; prefs: Record<string, unknown> }
@@ -174,6 +177,7 @@ let currentCapabilities: Capabilities = {
 let currentUser: AuthenticatedUser | null = null;
 let currentAvailableLabels: string[] = [];
 let currentAvailableAssignableUsers: string[] = [];
+let currentLabelColors: Record<string, string> = {};
 let selectedIssueId: string | null = null;
 let selectedMilestoneId: string | null = null;
 let issueFilter: IssueFilter = EMPTY_FILTER;
@@ -290,12 +294,39 @@ function findMilestone(milestoneId: string | null): MilestoneView | undefined {
   return currentMilestones.find((candidate) => candidate.id === milestoneId);
 }
 
+/**
+ * Colours label badges with the label's real colour, adjusted to stay
+ * readable. Colours are set through the CSSOM because the webview CSP
+ * forbids inline `style` attributes. High-contrast themes keep their own
+ * badge colours, which are chosen for accessibility.
+ */
+function applyLabelColors(root: ParentNode): void {
+  const highContrast =
+    document.body.classList.contains("vscode-high-contrast") ||
+    document.body.classList.contains("vscode-high-contrast-light") ||
+    window.matchMedia("(forced-colors: active)").matches;
+  if (highContrast) {
+    return;
+  }
+  root.querySelectorAll<HTMLElement>(".badge[data-label]").forEach((badge) => {
+    const color = currentLabelColors[badge.dataset.label ?? ""];
+    const colors = color ? readableBadgeColors(color) : null;
+    if (colors) {
+      badge.style.backgroundColor = colors.background;
+      badge.style.color = colors.foreground;
+    }
+  });
+}
+
 function renderLabelBadges(labels: readonly string[]): string {
   if (labels.length === 0) {
     return "";
   }
   return `<span class="badges">${labels
-    .map((label) => `<span class="badge">${escapeHtml(label)}</span>`)
+    .map(
+      (label) =>
+        `<span class="badge" data-label="${escapeAttr(label)}">${escapeHtml(label)}</span>`,
+    )
     .join("")}</span>`;
 }
 
@@ -362,6 +393,9 @@ function renderIssueList(): void {
       const item = document.createElement("div");
       item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
       item.dataset.issueId = issue.id;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(issue.id === selectedIssueId));
+      item.tabIndex = 0;
       const stateClass = issue.state === "closed" ? " state-closed" : "";
       const unseen =
         issue.id === selectedIssueId
@@ -372,15 +406,26 @@ function renderIssueList(): void {
           ? `<span class="badge new-comments" title="${unseen} new comment${unseen === 1 ? "" : "s"}">+${unseen} &#128172;</span>`
           : "";
       item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}${newComments}`;
-      item.addEventListener("click", () => {
+      const choose = (): void => {
         selectedIssueId = issue.id;
         showNewIssueForm = false;
         renderIssueList();
         renderIssueDetail();
+        document
+          .querySelector<HTMLElement>(`#issue-list .item[data-issue-id="${CSS.escape(issue.id)}"]`)
+          ?.focus();
+      };
+      item.addEventListener("click", choose);
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          choose();
+        }
       });
       list.appendChild(item);
     }
   }
+  applyLabelColors(list);
   if (filtered.length > issueListPageSize) {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
@@ -599,8 +644,8 @@ function renderIssueDetail(): void {
         .join("")}
     </select>
 
-    <label for="issue-labels-editor">Labels</label>
-    <div id="issue-labels-editor" class="checkbox-list">
+    <span id="issue-labels-heading" class="field-heading">Labels</span>
+    <div id="issue-labels-editor" class="checkbox-list" role="group" aria-labelledby="issue-labels-heading">
       ${
         labelOptions.length > 0
           ? labelOptions
@@ -613,8 +658,8 @@ function renderIssueDetail(): void {
       }
     </div>
 
-    <label for="issue-assignees-editor">Assignees</label>
-    <div id="issue-assignees-editor" class="checkbox-list">
+    <span id="issue-assignees-heading" class="field-heading">Assignees</span>
+    <div id="issue-assignees-editor" class="checkbox-list" role="group" aria-labelledby="issue-assignees-heading">
       ${
         assigneeOptions.length > 0
           ? assigneeOptions
@@ -644,6 +689,7 @@ function renderIssueDetail(): void {
     }
   `;
 
+  applyLabelColors(detail);
   enhanceMarkdownEditor(byId<HTMLTextAreaElement>("issue-body"), markdownSources);
   if (canWrite) {
     enhanceMarkdownEditor(byId<HTMLTextAreaElement>("comment-body"), markdownSources);
@@ -744,6 +790,15 @@ function renderMilestoneList(): void {
   for (const milestone of visibleMilestones) {
     const item = document.createElement("div");
     item.className = "item" + (milestone.id === selectedMilestoneId ? " selected" : "");
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(milestone.id === selectedMilestoneId));
+    item.tabIndex = 0;
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        item.click();
+      }
+    });
     const stateClass = milestone.state === "closed" ? " state-closed" : "";
     const due = milestone.dueOn
       ? `<span class="due">Due ${formatDate(milestone.dueOn)}</span>`
@@ -1033,6 +1088,7 @@ function activeTab(): TabName {
 function setActiveTab(tab: TabName): void {
   for (const name of ["issues", "milestones", "board"] as const) {
     byId<HTMLButtonElement>(`tab-${name}`).classList.toggle("active", tab === name);
+    byId<HTMLButtonElement>(`tab-${name}`).setAttribute("aria-selected", String(tab === name));
     byId<HTMLDivElement>(`view-${name}`).hidden = tab !== name;
   }
   if (tab === "board") {
@@ -1139,6 +1195,7 @@ function renderBoard(): void {
     }
     container.appendChild(section);
   }
+  applyLabelColors(container);
 }
 
 byId<HTMLButtonElement>("tab-issues").addEventListener("click", () => {
@@ -1329,6 +1386,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
       currentUser: message.currentUser,
       availableLabels: message.availableLabels,
       availableAssignableUsers: message.availableAssignableUsers,
+      labelColors: message.labelColors,
     };
     if (!templatesRequested) {
       templatesRequested = true;
@@ -1349,6 +1407,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     currentUser = message.currentUser;
     currentAvailableLabels = message.availableLabels;
     currentAvailableAssignableUsers = message.availableAssignableUsers;
+    currentLabelColors = message.labelColors;
     renderIssueLabelFilterOptions();
     renderIssueAssigneeFilterOptions();
     syncFilterControls();

@@ -219,6 +219,7 @@ export class PanelController {
       currentUser,
       availableLabels,
       availableAssignableUsers,
+      labelColors,
     ] = await Promise.all([
       this.provider.getCapabilities(options),
       this.provider.listIssues(options),
@@ -226,6 +227,8 @@ export class PanelController {
       this.getCurrentUser(),
       this.provider.listLabels(options),
       this.provider.listAssignableUsers(options),
+      // Colours only decorate badges; never let them fail the whole state.
+      this.provider.listLabelColors(options).catch((): Record<string, string> => ({})),
     ]);
     this.detectAndNotifyTransitions(issues, currentUser.username);
     this.postMessage({
@@ -236,6 +239,7 @@ export class PanelController {
       currentUser,
       availableLabels,
       availableAssignableUsers,
+      labelColors,
       ...(hasFetchTimestamps(this.provider) && this.provider.getIssuesFetchedAt() !== undefined
         ? { dataFetchedAt: this.provider.getIssuesFetchedAt() }
         : {}),

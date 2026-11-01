@@ -57,6 +57,8 @@ export type OutboundMessage =
       readonly currentUser: IAuthenticatedUser;
       readonly availableLabels: readonly string[];
       readonly availableAssignableUsers: readonly string[];
+      /** Label name to `rrggbb` colour, for the labels the provider colours. */
+      readonly labelColors: Readonly<Record<string, string>>;
       /** Epoch ms the issue list was last fetched from the remote, when known. */
       readonly dataFetchedAt?: number;
     }

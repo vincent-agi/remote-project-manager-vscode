@@ -51,6 +51,7 @@ function makeProvider(capabilities: ProviderCapabilities): IProjectProvider {
     updateMilestone: vi.fn().mockResolvedValue({ ...milestone, state: "closed" }),
     listLabels: vi.fn().mockResolvedValue(["bug"]),
     listAssignableUsers: vi.fn().mockResolvedValue(["octocat"]),
+    listLabelColors: vi.fn().mockResolvedValue({}),
     listComments: vi.fn().mockResolvedValue([]),
     addComment: vi.fn(),
   };
@@ -86,6 +87,7 @@ describe("PanelController.handleMessage 'requestState'", () => {
       currentUser: { username: "octocat" },
       availableLabels: ["bug"],
       availableAssignableUsers: ["octocat"],
+      labelColors: {},
     });
   });
 });
@@ -689,5 +691,31 @@ describe("PanelController comments", () => {
 
     expect(provider.addComment).not.toHaveBeenCalled();
     expect(posted.at(-1)).toMatchObject({ type: "error" });
+  });
+});
+
+describe("PanelController label colours", () => {
+  it("includes label colours in the state", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listLabelColors as ReturnType<typeof vi.fn>).mockResolvedValue({ bug: "d73a4a" });
+    const posted: { type: string; labelColors?: unknown }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.find((message) => message.type === "state")?.labelColors).toEqual({
+      bug: "d73a4a",
+    });
+  });
+
+  it("still sends the state when colours cannot be loaded", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listLabelColors as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("nope"));
+    const posted: { type: string; labelColors?: unknown }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.find((message) => message.type === "state")?.labelColors).toEqual({});
   });
 });

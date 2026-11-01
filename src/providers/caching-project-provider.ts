@@ -19,6 +19,7 @@ const MILESTONES_KEY = "milestones";
 const CAPABILITIES_KEY = "capabilities";
 const LABELS_KEY = "labels";
 const ASSIGNABLE_USERS_KEY = "assignableUsers";
+const LABEL_COLORS_KEY = "labelColors";
 
 /**
  * Decorates any {@link IProjectProvider} with a short TTL cache over its
@@ -147,6 +148,10 @@ export class CachingProjectProvider implements IProjectProvider, IFetchTimestamp
 
   listLabels(options?: FetchOptions): Promise<readonly string[]> {
     return this.cached(LABELS_KEY, options, () => this.inner.listLabels());
+  }
+
+  listLabelColors(options?: FetchOptions): Promise<Readonly<Record<string, string>>> {
+    return this.cached(LABEL_COLORS_KEY, options, () => this.inner.listLabelColors());
   }
 
   listAssignableUsers(options?: FetchOptions): Promise<readonly string[]> {

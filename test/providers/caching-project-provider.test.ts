@@ -66,6 +66,7 @@ function makeInner(): IProjectProvider {
     updateMilestone: vi.fn().mockResolvedValue(milestone),
     listLabels: vi.fn().mockResolvedValue(["bug"]),
     listAssignableUsers: vi.fn().mockResolvedValue(["octocat"]),
+    listLabelColors: vi.fn().mockResolvedValue({}),
     listComments: vi.fn().mockResolvedValue([]),
     addComment: vi.fn(),
   };

@@ -454,3 +454,15 @@ describe("GitlabProvider comments", () => {
     expect(comment.author).toBe("ghost");
   });
 });
+
+describe("GitlabProvider.listLabelColors", () => {
+  it("strips the leading # from GitLab's colours", async () => {
+    const client = makeClient();
+    client.ProjectLabels.all = vi
+      .fn()
+      .mockResolvedValue([{ name: "bug", color: "#d9534f" }, { name: "plain" }]);
+    expect(await new GitlabProvider(client, "acme/widgets").listLabelColors()).toEqual({
+      bug: "d9534f",
+    });
+  });
+});
