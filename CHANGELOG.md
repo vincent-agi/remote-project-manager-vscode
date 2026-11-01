@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/vincent-agi/remote-project-manager-vscode/compare/v0.1.0...v0.1.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* 📦 ship the esbuild bundle and simple-git v4 in the release ([cd4d239](https://github.com/vincent-agi/remote-project-manager-vscode/commit/cd4d2395c497f6d296713e5337258aeeba477c8d))
+* 📦 ship the esbuild bundle and simple-git v4 in the release ([dfce036](https://github.com/vincent-agi/remote-project-manager-vscode/commit/dfce0360d14d7e8091d03bbf81b97e991d664647))
+
 ## [0.1.0](https://github.com/vincent-agi/remote-project-manager-vscode/compare/v0.0.1...v0.1.0) (2026-11-01)
 
 
