@@ -1935,6 +1935,14 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     vscode.commands.registerCommand("remoteProjectManager.uninstallCommitMsgHook", () => {
       void uninstallCommitMsgHook();
     }),
+    vscode.commands.registerCommand("remoteProjectManager.openWalkthrough", () => {
+      // The id is built from the manifest rather than hard-coded, so it survives a publisher rename.
+      void vscode.commands.executeCommand(
+        "workbench.action.openWalkthrough",
+        `${context.extension.id}#getStarted`,
+        false,
+      );
+    }),
     vscode.commands.registerCommand("remoteProjectManager.runDiagnostics", () => {
       void runDiagnostics(context);
     }),

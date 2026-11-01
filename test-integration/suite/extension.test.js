@@ -117,6 +117,7 @@ describe("Remote Project Manager — integration", () => {
       "remoteProjectManager.createIssueFromSelection",
       "remoteProjectManager.createIssueFromTodo",
       "remoteProjectManager.openIssueByNumber",
+      "remoteProjectManager.openWalkthrough",
     ];
     for (const command of expected) {
       assert.ok(commands.includes(command), `command not registered: ${command}`);

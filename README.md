@@ -141,6 +141,10 @@ Beyond the panel, the extension contributes Command Palette entries for a standa
 
 The "active issue" for these commands is resolved from your current branch name (matching `${issue_id}` in `remoteProjectManager.branchNamePattern`), falling back to a picker when it can't be determined.
 
+### Getting Started
+
+New to the extension? Run **Remote Project Manager: Open Walkthrough** (or click **Get Started** in the sidebar) for a guided tour: connect, pick your platform, create an issue, make a first commit.
+
 ### Keyboard Shortcuts
 
 Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kbd>+<kbd>⌥</kbd>+<kbd>R</kbd> instead of <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>, followed by the second key:

@@ -106,6 +106,10 @@
       {
         "command": "remoteProjectManager.openIssueByNumber",
         "title": "Remote Project Manager: Open Issue by Number"
+      },
+      {
+        "command": "remoteProjectManager.openWalkthrough",
+        "title": "Remote Project Manager: Open Walkthrough"
       }
     ],
     "viewsContainers": {
@@ -128,7 +132,7 @@
     "viewsWelcome": [
       {
         "view": "remoteProjectManager.sidebar",
-        "contents": "Manage GitHub and GitLab Issues and Milestones from a central panel.\n[Open Panel](command:remoteProjectManager.openPanel)"
+        "contents": "Manage GitHub and GitLab Issues and Milestones from a central panel.\n[Open Panel](command:remoteProjectManager.openPanel)\n[Get Started](command:remoteProjectManager.openWalkthrough)"
       }
     ],
     "configuration": {
@@ -302,6 +306,60 @@
         "command": "remoteProjectManager.refresh",
         "key": "ctrl+alt+r r",
         "mac": "cmd+alt+r r"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "getStarted",
+        "title": "Get started with Remote Project Manager",
+        "description": "Connect to your repository and follow an issue from creation to commit.",
+        "steps": [
+          {
+            "id": "connect",
+            "title": "Connect to your repository",
+            "description": "Open the panel and sign in with a personal access token.\n[Open Panel](command:remoteProjectManager.openPanel)",
+            "media": {
+              "markdown": "media/walkthrough/connect.md"
+            },
+            "completionEvents": [
+              "onCommand:remoteProjectManager.openPanel"
+            ]
+          },
+          {
+            "id": "provider",
+            "title": "Pick your platform",
+            "description": "Choose GitHub or GitLab (and a self-hosted host if you need one).\n[Open Settings](command:workbench.action.openSettings?%5B%22remoteProjectManager%22%5D)",
+            "media": {
+              "markdown": "media/walkthrough/provider.md"
+            },
+            "completionEvents": [
+              "onSettingChanged:remoteProjectManager.provider",
+              "onSettingChanged:remoteProjectManager.gitlabHost"
+            ]
+          },
+          {
+            "id": "issue",
+            "title": "Create your first issue",
+            "description": "Write the issue with the Markdown editor, labels and a milestone.\n[New Issue](command:remoteProjectManager.newIssue)",
+            "media": {
+              "markdown": "media/walkthrough/issue.md"
+            },
+            "completionEvents": [
+              "onCommand:remoteProjectManager.newIssue"
+            ]
+          },
+          {
+            "id": "commit",
+            "title": "Make a first commit",
+            "description": "Compose a Conventional Commit with a Gitmoji and an issue reference.\n[Compose Commit](command:remoteProjectManager.composeCommit)",
+            "media": {
+              "markdown": "media/walkthrough/commit.md"
+            },
+            "completionEvents": [
+              "onCommand:remoteProjectManager.composeCommit"
+            ]
+          }
+        ]
       }
     ]
   },
