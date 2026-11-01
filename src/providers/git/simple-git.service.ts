@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import simpleGit from "simple-git";
+import { simpleGit } from "simple-git";
 import type {
   GitGraphCommit,
   GitLogEntry,
