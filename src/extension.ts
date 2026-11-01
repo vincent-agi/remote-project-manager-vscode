@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { promises as fs } from "node:fs";
 import { Octokit } from "@octokit/rest";
 import { Gitlab } from "@gitbeaker/rest";
 import { ensureToken, type ICredentialStore } from "./core/auth/ensure-token";
@@ -29,6 +30,7 @@ import { PanelController } from "./webview/panel-controller";
 import type { InboundMessage, RepositoryOptionView } from "./webview/messages";
 import { getWebviewHtml } from "./webview/webview-html";
 import { extractIssueNumberFromBranch } from "./core/git/branch-issue-ref";
+import { buildCommitMsgHookScript, classifyExistingHook } from "./core/git/commit-msg-hook";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { logger } from "./logger";
@@ -1542,6 +1544,88 @@ function readExtensionVersion(context: vscode.ExtensionContext): string {
   return typeof version === "string" ? version : "unknown";
 }
 
+/** Reads a file as UTF-8, or `undefined` when it does not exist. */
+async function readTextIfExists(uri: vscode.Uri): Promise<string | undefined> {
+  try {
+    return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** Installs the commit-msg hook (#85) that runs the commit convention check locally. */
+async function installCommitMsgHook(): Promise<void> {
+  const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!cwd) {
+    void vscode.window.showErrorMessage("No workspace folder open.");
+    return;
+  }
+  try {
+    const hooksDir = vscode.Uri.file(await new SimpleGitService().getHooksPath(cwd));
+    const hookUri = vscode.Uri.joinPath(hooksDir, "commit-msg");
+    const existing = await readTextIfExists(hookUri);
+    if (classifyExistingHook(existing) === "foreign") {
+      const choice = await vscode.window.showWarningMessage(
+        "A commit-msg hook already exists. Replace it? The current one is kept as commit-msg.backup.",
+        { modal: true },
+        "Replace",
+      );
+      if (choice !== "Replace") {
+        return;
+      }
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.joinPath(hooksDir, "commit-msg.backup"),
+        Buffer.from(existing ?? "", "utf8"),
+      );
+    }
+    await vscode.workspace.fs.createDirectory(hooksDir);
+    await vscode.workspace.fs.writeFile(hookUri, Buffer.from(buildCommitMsgHookScript(), "utf8"));
+    await fs.chmod(hookUri.fsPath, 0o755);
+    void vscode.window.showInformationMessage(
+      `Commit message hook installed in ${hookUri.fsPath}.`,
+    );
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `Could not install the commit message hook: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Removes the hook written by {@link installCommitMsgHook}, restoring a backed-up one. */
+async function uninstallCommitMsgHook(): Promise<void> {
+  const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!cwd) {
+    void vscode.window.showErrorMessage("No workspace folder open.");
+    return;
+  }
+  try {
+    const hooksDir = vscode.Uri.file(await new SimpleGitService().getHooksPath(cwd));
+    const hookUri = vscode.Uri.joinPath(hooksDir, "commit-msg");
+    const kind = classifyExistingHook(await readTextIfExists(hookUri));
+    if (kind !== "managed") {
+      void vscode.window.showInformationMessage(
+        kind === "none"
+          ? "No commit-msg hook is installed."
+          : "The existing commit-msg hook was not installed by this extension; leaving it alone.",
+      );
+      return;
+    }
+    await vscode.workspace.fs.delete(hookUri);
+    const backupUri = vscode.Uri.joinPath(hooksDir, "commit-msg.backup");
+    const backup = await readTextIfExists(backupUri);
+    if (backup !== undefined) {
+      await vscode.workspace.fs.writeFile(hookUri, Buffer.from(backup, "utf8"));
+      await fs.chmod(hookUri.fsPath, 0o755);
+      await vscode.workspace.fs.delete(backupUri);
+    }
+    void vscode.window.showInformationMessage("Commit message hook removed.");
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `Could not remove the commit message hook: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 /**
  * "Run diagnostics" (#82): probes the remote detection, the stored token
  * and (only when a token already exists, so no prompt is ever raised) the
@@ -1668,6 +1752,12 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     }),
     vscode.commands.registerCommand("remoteProjectManager.newMilestone", () => {
       void openPanel(context, { kind: "newMilestone" });
+    }),
+    vscode.commands.registerCommand("remoteProjectManager.installCommitMsgHook", () => {
+      void installCommitMsgHook();
+    }),
+    vscode.commands.registerCommand("remoteProjectManager.uninstallCommitMsgHook", () => {
+      void uninstallCommitMsgHook();
     }),
     vscode.commands.registerCommand("remoteProjectManager.runDiagnostics", () => {
       void runDiagnostics(context);

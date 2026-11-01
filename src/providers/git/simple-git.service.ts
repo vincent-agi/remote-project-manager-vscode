@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import simpleGit from "simple-git";
 import type {
   GitLogEntry,
@@ -89,6 +90,13 @@ export class SimpleGitService implements IGitService {
     } catch {
       return false;
     }
+  }
+
+  /** Absolute path of the hooks directory, honouring `core.hooksPath` and worktrees. */
+  async getHooksPath(cwd: string): Promise<string> {
+    const raw = await simpleGit(cwd).raw(["rev-parse", "--git-path", "hooks"]);
+    const hooksPath = raw.trim();
+    return path.isAbsolute(hooksPath) ? hooksPath : path.join(cwd, hooksPath);
   }
 
   async getStagedFiles(cwd: string): Promise<string[]> {

@@ -86,6 +86,14 @@
       {
         "command": "remoteProjectManager.runDiagnostics",
         "title": "Remote Project Manager: Run Diagnostics"
+      },
+      {
+        "command": "remoteProjectManager.installCommitMsgHook",
+        "title": "Remote Project Manager: Install Commit Message Hook"
+      },
+      {
+        "command": "remoteProjectManager.uninstallCommitMsgHook",
+        "title": "Remote Project Manager: Uninstall Commit Message Hook"
       }
     ],
     "viewsContainers": {
