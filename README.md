@@ -37,9 +37,9 @@ Three layers following Clean Architecture ([ADR-0001](docs/adr/0001-architecture
 ```mermaid
 flowchart LR
   subgraph PRES["Presentation: src/extension.ts, src/webview/"]
-    EXT[extension.ts<br/>composition root]
+    EXT[extension.ts<br/>activation and composition root]
     PC[PanelController]
-    WV[webview-ui/main.ts<br/>plain script, no bundler]
+    WV[webview-ui/<br/>ES modules, no bundler]
   end
   subgraph CORE["Domain: src/core/ (no VS Code import)"]
     IPP{IProjectProvider}
@@ -89,15 +89,21 @@ src/
   core/            # domain: models, provider interface, auth, automation, git, ai, cache, workspace
   providers/       # github/, gitlab/, git/ (simple-git), caching-project-provider.ts
   webview/         # panel controller, messages, HTML generation
-  webview-ui/      # script running inside the webview (no bundler)
-  extension.ts     # activation and composition root
+  webview-ui/      # ES modules running inside the webview (no bundler)
+  commands/        # command handlers: commit, issue context, pull request, maintenance
+  panel.ts         # the central webview panel and its lifecycle
+  tree-view.ts     # the sidebar tree of assigned issues
+  repository.ts    # which repository is used, and switching between several
+  connection.ts    # providers, tokens and connections
+  state.ts         # mutable state shared between those modules
+  extension.ts     # activation and wiring only
 test/              # Vitest specs mirroring src/
 test-integration/  # real VS Code end-to-end suite
 docs/adr/          # 7 architecture decision records
 docs/functionals/  # functional guides (see INDEX.md)
 ```
 
-**Quality:** 287 Vitest unit tests across 34 files, an end-to-end suite in a real VS Code (`npm run test:integration`), ESLint with type-checked rules, Prettier check. The [CI workflow](.github/workflows/ci.yml) runs compile, lint, format check, tests with a JUnit report, and `vsce package`, uploading the `.vsix` as an artifact.
+**Quality:** hundreds of Vitest unit tests, an end-to-end suite in a real VS Code (`npm run test:integration`), ESLint with type-checked rules, Prettier check. The [CI workflow](.github/workflows/ci.yml) runs compile, lint, format check, tests with a JUnit report, and `vsce package`, uploading the `.vsix` as an artifact.
 
 Deep dives: [`docs/functionals/`](docs/functionals/INDEX.md), [`docs/adr/`](docs/adr/), [CONTRIBUTING.md](CONTRIBUTING.md).
 
