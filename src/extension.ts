@@ -1050,8 +1050,14 @@ async function getActiveConnection(
  * into the Source Control input box (or the clipboard, if the git
  * extension isn't available).
  */
-async function composeCommit(context: vscode.ExtensionContext): Promise<void> {
-  const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+async function composeCommit(
+  context: vscode.ExtensionContext,
+  scm?: { readonly rootUri?: vscode.Uri },
+): Promise<void> {
+  // The Source Control title button passes the clicked repository, so in a
+  // multi-root workspace the message lands in that repository's input box.
+  const cwd =
+    scm?.rootUri?.fsPath ?? activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
     void vscode.window.showErrorMessage("No workspace folder open.");
     return;
@@ -1649,9 +1655,12 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     vscode.commands.registerCommand("remoteProjectManager.refresh", () => {
       void openPanel(context, { kind: "refresh" });
     }),
-    vscode.commands.registerCommand("remoteProjectManager.composeCommit", () => {
-      void composeCommit(context);
-    }),
+    vscode.commands.registerCommand(
+      "remoteProjectManager.composeCommit",
+      (scm?: { readonly rootUri?: vscode.Uri }) => {
+        void composeCommit(context, scm);
+      },
+    ),
     vscode.commands.registerCommand("remoteProjectManager.pickGitmoji", () => {
       void pickGitmojiCommand(context);
     }),

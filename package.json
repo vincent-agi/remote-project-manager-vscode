@@ -44,7 +44,8 @@
       },
       {
         "command": "remoteProjectManager.composeCommit",
-        "title": "Remote Project Manager: Compose Commit (Conventional + Gitmoji)"
+        "title": "Remote Project Manager: Compose Commit (Conventional + Gitmoji)",
+        "icon": "$(sparkle)"
       },
       {
         "command": "remoteProjectManager.pickGitmoji",
@@ -206,6 +207,13 @@
         {
           "command": "remoteProjectManager.openIssueInBrowser",
           "when": "false"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "remoteProjectManager.composeCommit",
+          "when": "scmProvider == git",
+          "group": "navigation@10"
         }
       ]
     },
