@@ -51,6 +51,19 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
           <option value="open">Open</option>
           <option value="closed">Closed</option>
         </select>
+        <select id="issue-milestone-filter" title="Filter by milestone">
+          <option value="">All milestones</option>
+        </select>
+        <select id="issue-saved-filters" title="Apply a saved filter">
+          <option value="">Saved filters…</option>
+        </select>
+        <button id="issue-filter-save" class="tab" type="button" title="Save the current filter">Save filter…</button>
+        <button id="issue-filter-delete" class="tab" type="button" title="Delete this saved filter" hidden>Delete filter</button>
+        <span id="saved-filter-form" class="saved-filter-form" hidden>
+          <input id="saved-filter-name" type="text" placeholder="Filter name" />
+          <button id="saved-filter-confirm" class="tab" type="button">Save</button>
+          <button id="saved-filter-cancel" class="tab" type="button">Cancel</button>
+        </span>
         <button id="issue-new" class="tab" type="button" disabled>+ New Issue</button>
       </div>
       <div class="list" id="issue-list"></div>

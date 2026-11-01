@@ -5,6 +5,18 @@
 // because the host and webview programs have separate `rootDir`s.
 
 import { hasStateChanged } from "./state-diff.js";
+import {
+  EMPTY_FILTER,
+  filterIssues,
+  NO_MILESTONE,
+  PRESET_FILTERS,
+  readSavedFilters,
+  removeSavedFilter,
+  sameFilter,
+  upsertSavedFilter,
+  type IssueFilter,
+  type SavedFilter,
+} from "./issue-view-model.js";
 
 interface RepositoryOptionView {
   id: string;
@@ -124,11 +136,9 @@ let currentAvailableLabels: string[] = [];
 let currentAvailableAssignableUsers: string[] = [];
 let selectedIssueId: string | null = null;
 let selectedMilestoneId: string | null = null;
-let issueMilestoneFilter: string | null = null;
-let issueSearchQuery = "";
-let issueLabelFilter: string | null = null;
-let issueAssigneeFilter: string | null = null;
-let issueStateFilter: "all" | "open" | "closed" = "all";
+let issueFilter: IssueFilter = EMPTY_FILTER;
+let uiPrefs: Record<string, unknown> = {};
+let savedFilters: SavedFilter[] = [];
 let milestoneStateFilter: "all" | "open" | "closed" = "all";
 const LIST_PAGE_SIZE = 50;
 let issueListPageSize = LIST_PAGE_SIZE;
@@ -206,33 +216,7 @@ function renderLabelBadges(labels: readonly string[]): string {
 function renderIssueList(): void {
   const list = byId<HTMLDivElement>("issue-list");
   list.innerHTML = "";
-  const query = issueSearchQuery.trim().toLowerCase();
-  const issues = currentIssues.filter((candidate) => {
-    if (issueMilestoneFilter && candidate.milestoneId !== issueMilestoneFilter) {
-      return false;
-    }
-    if (
-      query &&
-      !candidate.title.toLowerCase().includes(query) &&
-      !candidate.body.toLowerCase().includes(query)
-    ) {
-      return false;
-    }
-    if (issueLabelFilter && !candidate.labels.includes(issueLabelFilter)) {
-      return false;
-    }
-    if (issueAssigneeFilter) {
-      const wanted =
-        issueAssigneeFilter === "@me" ? (currentUser?.username ?? null) : issueAssigneeFilter;
-      if (!wanted || !candidate.assignees.includes(wanted)) {
-        return false;
-      }
-    }
-    if (issueStateFilter !== "all" && candidate.state !== issueStateFilter) {
-      return false;
-    }
-    return true;
-  });
+  const issues = filterIssues(currentIssues, issueFilter, currentUser?.username ?? null);
   const visibleIssues = issues.slice(0, issueListPageSize);
   for (const issue of visibleIssues) {
     const item = document.createElement("div");
@@ -564,9 +548,8 @@ function renderMilestoneDetail(): void {
   `;
 
   byId<HTMLButtonElement>("milestone-view-issues").addEventListener("click", () => {
-    issueMilestoneFilter = milestone.id;
+    setIssueFilter({ ...EMPTY_FILTER, milestone: milestone.id });
     setActiveTab("issues");
-    renderIssueList();
   });
 
   if (canWrite) {
@@ -640,7 +623,9 @@ function renderIssueLabelFilterOptions(): void {
       .map((label) => `<option value="${escapeAttr(label)}">${escapeHtml(label)}</option>`)
       .join("");
   select.value = currentAvailableLabels.includes(previousValue) ? previousValue : "";
-  issueLabelFilter = select.value || null;
+  if ((select.value || null) !== issueFilter.label) {
+    issueFilter = { ...issueFilter, label: select.value || null };
+  }
 }
 
 function renderIssueAssigneeFilterOptions(): void {
@@ -653,7 +638,57 @@ function renderIssueAssigneeFilterOptions(): void {
       .map((username) => `<option value="${escapeAttr(username)}">${escapeHtml(username)}</option>`)
       .join("");
   select.value = previousValue === "@me" || usernames.includes(previousValue) ? previousValue : "";
-  issueAssigneeFilter = select.value || null;
+  if ((select.value || null) !== issueFilter.assignee) {
+    issueFilter = { ...issueFilter, assignee: select.value || null };
+  }
+}
+
+/** Replaces the issue filter, resets paging, and re-renders the list and its controls. */
+function setIssueFilter(next: IssueFilter): void {
+  issueFilter = next;
+  issueListPageSize = LIST_PAGE_SIZE;
+  syncFilterControls();
+  renderIssueList();
+}
+
+function persistSavedFilters(): void {
+  uiPrefs = { ...uiPrefs, savedFilters };
+  post({ type: "saveUiPrefs", prefs: uiPrefs });
+}
+
+/** Makes every filter control reflect {@link issueFilter} and the saved-filter list. */
+function syncFilterControls(): void {
+  byId<HTMLInputElement>("issue-search").value = issueFilter.query;
+  byId<HTMLSelectElement>("issue-label-filter").value = issueFilter.label ?? "";
+  byId<HTMLSelectElement>("issue-assignee-filter").value = issueFilter.assignee ?? "";
+  byId<HTMLSelectElement>("issue-state-filter").value = issueFilter.state;
+
+  const milestoneSelect = byId<HTMLSelectElement>("issue-milestone-filter");
+  milestoneSelect.innerHTML =
+    `<option value="">All milestones</option><option value="${NO_MILESTONE}">No milestone</option>` +
+    currentMilestones
+      .map(
+        (milestone) =>
+          `<option value="${escapeAttr(milestone.id)}">${escapeHtml(milestone.title)}</option>`,
+      )
+      .join("");
+  milestoneSelect.value = issueFilter.milestone ?? "";
+
+  const matching = [...PRESET_FILTERS, ...savedFilters].find((entry) =>
+    sameFilter(entry.filter, issueFilter),
+  );
+  const savedSelect = byId<HTMLSelectElement>("issue-saved-filters");
+  const option = (entry: SavedFilter): string =>
+    `<option value="${escapeAttr(entry.name)}">${escapeHtml(entry.name)}</option>`;
+  savedSelect.innerHTML =
+    `<option value="">Saved filters…</option>` +
+    `<optgroup label="Built-in">${PRESET_FILTERS.map(option).join("")}</optgroup>` +
+    (savedFilters.length > 0
+      ? `<optgroup label="Yours">${savedFilters.map(option).join("")}</optgroup>`
+      : "");
+  savedSelect.value = matching?.name ?? "";
+  byId<HTMLButtonElement>("issue-filter-delete").hidden =
+    !matching || !savedFilters.some((entry) => entry.name === matching.name);
 }
 
 function setActiveTab(tab: "issues" | "milestones"): void {
@@ -664,38 +699,60 @@ function setActiveTab(tab: "issues" | "milestones"): void {
 }
 
 byId<HTMLButtonElement>("tab-issues").addEventListener("click", () => {
-  issueMilestoneFilter = null;
-  issueLabelFilter = null;
-  issueAssigneeFilter = null;
-  issueStateFilter = "all";
-  issueSearchQuery = "";
-  issueListPageSize = LIST_PAGE_SIZE;
-  byId<HTMLSelectElement>("issue-label-filter").value = "";
-  byId<HTMLSelectElement>("issue-assignee-filter").value = "";
-  byId<HTMLSelectElement>("issue-state-filter").value = "all";
-  byId<HTMLInputElement>("issue-search").value = "";
+  setIssueFilter(EMPTY_FILTER);
   setActiveTab("issues");
-  renderIssueList();
 });
 byId<HTMLInputElement>("issue-search").addEventListener("input", (event) => {
-  issueSearchQuery = (event.target as HTMLInputElement).value;
-  issueListPageSize = LIST_PAGE_SIZE;
-  renderIssueList();
+  setIssueFilter({ ...issueFilter, query: (event.target as HTMLInputElement).value });
 });
 byId<HTMLSelectElement>("issue-label-filter").addEventListener("change", (event) => {
-  issueLabelFilter = (event.target as HTMLSelectElement).value || null;
-  issueListPageSize = LIST_PAGE_SIZE;
-  renderIssueList();
+  setIssueFilter({ ...issueFilter, label: (event.target as HTMLSelectElement).value || null });
 });
 byId<HTMLSelectElement>("issue-assignee-filter").addEventListener("change", (event) => {
-  issueAssigneeFilter = (event.target as HTMLSelectElement).value || null;
-  issueListPageSize = LIST_PAGE_SIZE;
-  renderIssueList();
+  setIssueFilter({ ...issueFilter, assignee: (event.target as HTMLSelectElement).value || null });
 });
 byId<HTMLSelectElement>("issue-state-filter").addEventListener("change", (event) => {
-  issueStateFilter = (event.target as HTMLSelectElement).value as "all" | "open" | "closed";
-  issueListPageSize = LIST_PAGE_SIZE;
-  renderIssueList();
+  setIssueFilter({
+    ...issueFilter,
+    state: (event.target as HTMLSelectElement).value as IssueFilter["state"],
+  });
+});
+byId<HTMLSelectElement>("issue-milestone-filter").addEventListener("change", (event) => {
+  setIssueFilter({ ...issueFilter, milestone: (event.target as HTMLSelectElement).value || null });
+});
+byId<HTMLSelectElement>("issue-saved-filters").addEventListener("change", (event) => {
+  const name = (event.target as HTMLSelectElement).value;
+  const chosen = [...PRESET_FILTERS, ...savedFilters].find((entry) => entry.name === name);
+  if (chosen) {
+    setIssueFilter(chosen.filter);
+  }
+});
+byId<HTMLButtonElement>("issue-filter-save").addEventListener("click", () => {
+  byId<HTMLSpanElement>("saved-filter-form").hidden = false;
+  byId<HTMLInputElement>("saved-filter-name").focus();
+});
+byId<HTMLButtonElement>("saved-filter-cancel").addEventListener("click", () => {
+  byId<HTMLSpanElement>("saved-filter-form").hidden = true;
+  byId<HTMLInputElement>("saved-filter-name").value = "";
+});
+byId<HTMLButtonElement>("saved-filter-confirm").addEventListener("click", () => {
+  const input = byId<HTMLInputElement>("saved-filter-name");
+  const next = upsertSavedFilter(savedFilters, input.value, issueFilter);
+  if (!next) {
+    showError("Enter a name that is not one of the built-in filters.");
+    return;
+  }
+  savedFilters = next;
+  persistSavedFilters();
+  input.value = "";
+  byId<HTMLSpanElement>("saved-filter-form").hidden = true;
+  syncFilterControls();
+});
+byId<HTMLButtonElement>("issue-filter-delete").addEventListener("click", () => {
+  const name = byId<HTMLSelectElement>("issue-saved-filters").value;
+  savedFilters = removeSavedFilter(savedFilters, name);
+  persistSavedFilters();
+  syncFilterControls();
 });
 byId<HTMLSelectElement>("milestone-state-filter").addEventListener("change", (event) => {
   milestoneStateFilter = (event.target as HTMLSelectElement).value as "all" | "open" | "closed";
@@ -753,6 +810,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     currentAvailableAssignableUsers = message.availableAssignableUsers;
     renderIssueLabelFilterOptions();
     renderIssueAssigneeFilterOptions();
+    syncFilterControls();
     byId<HTMLButtonElement>("issue-new").disabled = !currentCapabilities.canWriteIssues;
     byId<HTMLButtonElement>("milestone-new").disabled = !currentCapabilities.canWriteMilestones;
     renderIssueList();
@@ -772,10 +830,13 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
   } else if (message.type === "selectIssue") {
     selectedIssueId = message.id;
     showNewIssueForm = false;
-    issueMilestoneFilter = null;
+    setIssueFilter({ ...issueFilter, milestone: null });
     setActiveTab("issues");
-    renderIssueList();
     renderIssueDetail();
+  } else if (message.type === "uiPrefs") {
+    uiPrefs = { ...message.prefs };
+    savedFilters = readSavedFilters(uiPrefs);
+    syncFilterControls();
   } else if (message.type === "openNewIssueForm") {
     selectedIssueId = null;
     showNewIssueForm = true;

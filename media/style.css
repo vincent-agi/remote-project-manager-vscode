@@ -330,3 +330,14 @@ body {
   color: var(--vscode-button-foreground);
   border: 1px solid var(--vscode-button-border, transparent);
 }
+
+.saved-filter-form {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 6px;
+}
+
+.saved-filter-form input[type="text"] {
+  flex: 1 1 auto;
+}
