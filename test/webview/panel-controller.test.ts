@@ -484,3 +484,55 @@ describe("PanelController error handling", () => {
     expect(postMessage).toHaveBeenCalledWith({ type: "error", message: "401 Unauthorized" });
   });
 });
+
+describe("PanelController UI preferences", () => {
+  it("posts the stored preferences before the state on requestState", async () => {
+    const posted: { type: string }[] = [];
+    const store = { get: vi.fn().mockReturnValue({ sort: "updated" }), set: vi.fn() };
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      store,
+    );
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.map((message) => message.type)).toEqual(["uiPrefs", "state"]);
+    expect(posted[0]).toEqual({ type: "uiPrefs", prefs: { sort: "updated" } });
+  });
+
+  it("persists saved preferences without refetching", async () => {
+    const provider = makeProvider(fullAccess);
+    const store = { get: vi.fn().mockReturnValue({}), set: vi.fn() };
+    const controller = new PanelController(
+      provider,
+      vi.fn(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      store,
+    );
+
+    await controller.handleMessage({ type: "saveUiPrefs", prefs: { sort: "number" } });
+
+    expect(store.set).toHaveBeenCalledWith({ sort: "number" });
+    expect(provider.listIssues).not.toHaveBeenCalled();
+  });
+
+  it("ignores saveUiPrefs and skips uiPrefs when no store is wired", async () => {
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(makeProvider(fullAccess), (message) =>
+      posted.push(message),
+    );
+
+    await controller.handleMessage({ type: "saveUiPrefs", prefs: {} });
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.map((message) => message.type)).toEqual(["state"]);
+  });
+});

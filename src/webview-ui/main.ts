@@ -1,19 +1,10 @@
-// This file compiles with module:"none" into a single plain <script> —
-// no bundler, no ES module graph — so it cannot use real `import`
-// statements. The message shapes and the hasStateChanged logic below are
-// therefore manually mirrored from src/webview/messages.ts and
-// src/webview-ui/state-diff.ts (which stays the unit-tested source of
-// truth for the diff algorithm); keep them in sync by hand.
+// This file compiles to an ES module loaded with `<script type="module">`.
+// Pure logic lives in sibling modules (imported with a `.js` extension, as
+// the browser sees the compiled output) so it can be unit tested. The
+// message shapes below are mirrored by hand from src/webview/messages.ts,
+// because the host and webview programs have separate `rootDir`s.
 
-function hasStateChanged<T>(previous: T | null, next: T): boolean {
-  if (previous === null) {
-    return true;
-  }
-  if (previous === next) {
-    return false;
-  }
-  return JSON.stringify(previous) !== JSON.stringify(next);
-}
+import { hasStateChanged } from "./state-diff.js";
 
 interface RepositoryOptionView {
   id: string;
@@ -80,6 +71,7 @@ type OutboundMessage =
       availableLabels: string[];
       availableAssignableUsers: string[];
     }
+  | { type: "uiPrefs"; prefs: Record<string, unknown> }
   | { type: "repositoryOptions"; options: RepositoryOptionView[] }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
@@ -110,7 +102,8 @@ type InboundMessage =
       id: string;
       patch: Partial<Pick<MilestoneView, "title" | "description" | "state" | "dueOn">>;
     }
-  | { type: "createBranchForIssue"; id: string };
+  | { type: "createBranchForIssue"; id: string }
+  | { type: "saveUiPrefs"; prefs: Record<string, unknown> };
 
 declare function acquireVsCodeApi(): {
   postMessage(message: InboundMessage): void;

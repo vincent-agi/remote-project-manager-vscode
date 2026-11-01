@@ -7,7 +7,7 @@ import type {
   IProjectProvider,
 } from "../core/providers/project-provider.interface";
 import { assertCanWrite } from "../core/providers/project-provider.interface";
-import type { InboundMessage, OutboundMessage } from "./messages";
+import type { InboundMessage, OutboundMessage, UiPrefsView } from "./messages";
 
 /** Called when an issue update crosses a recognized lifecycle transition. */
 export type IssueTransitionHandler = (issue: IIssue, transition: IssueTransition) => void;
@@ -23,6 +23,12 @@ export type NewAssignmentHandler = (issue: IIssue) => void;
  * `handleMessage`'s catch turns into an `error` message.
  */
 export type CreateBranchRequestHandler = (issue: IIssue) => Promise<string | null>;
+
+/** Persists the webview's UI preferences (backed by `workspaceState` in the extension host). */
+export interface UiPrefsStore {
+  get(): UiPrefsView;
+  set(prefs: UiPrefsView): void | PromiseLike<void>;
+}
 
 /**
  * Drives the central panel's state: fetches issues/milestones/capabilities
@@ -58,12 +64,19 @@ export class PanelController {
     private readonly onCreateBranchRequest?: CreateBranchRequestHandler,
     private readonly onNewAssignment?: NewAssignmentHandler,
     private readonly onError?: (error: unknown) => void,
+    private readonly uiPrefsStore?: UiPrefsStore,
   ) {}
 
   async handleMessage(message: InboundMessage): Promise<void> {
     try {
       switch (message.type) {
+        case "saveUiPrefs":
+          await this.uiPrefsStore?.set(message.prefs);
+          return;
         case "requestState":
+          if (this.uiPrefsStore) {
+            this.postMessage({ type: "uiPrefs", prefs: this.uiPrefsStore.get() });
+          }
           await this.sendState(message.forceRefresh ? { forceRefresh: true } : undefined);
           return;
         case "createIssue":

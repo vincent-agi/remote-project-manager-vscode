@@ -55,6 +55,9 @@ import { replaceManagedSection } from "./core/ai/managed-section";
 import { resolveSafeRelativeSegments } from "./core/workspace/safe-relative-path";
 import type { IMilestone } from "./core/models/milestone.model";
 
+/** `workspaceState` key holding the panel's UI preferences (saved filters, sort order, ...). */
+const UI_PREFS_KEY = "remoteProjectManager.uiPrefs";
+
 function secretKeyFor(provider: ProviderKind): string {
   return `remoteProjectManager.token.${provider}`;
 }
@@ -451,6 +454,10 @@ async function buildController(
         panel.dispose();
         void openPanel(context);
       });
+    },
+    {
+      get: () => context.workspaceState.get<Record<string, unknown>>(UI_PREFS_KEY, {}),
+      set: (prefs) => context.workspaceState.update(UI_PREFS_KEY, prefs),
     },
   );
 }

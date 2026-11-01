@@ -17,6 +17,12 @@ export interface RepositoryOptionView {
   readonly repository: string;
 }
 
+/**
+ * Per-workspace UI preferences (saved filters, sort order, ...). Opaque to
+ * the host: the webview owns the shape and validates what it reads back.
+ */
+export type UiPrefsView = Readonly<Record<string, unknown>>;
+
 /** Messages the webview sends to the extension host. */
 export type InboundMessage =
   | { readonly type: "requestState"; readonly forceRefresh?: boolean }
@@ -25,7 +31,8 @@ export type InboundMessage =
   | { readonly type: "createIssue"; readonly input: CreateIssueInput }
   | { readonly type: "updateMilestone"; readonly id: string; readonly patch: UpdateMilestoneInput }
   | { readonly type: "createMilestone"; readonly input: CreateMilestoneInput }
-  | { readonly type: "createBranchForIssue"; readonly id: string };
+  | { readonly type: "createBranchForIssue"; readonly id: string }
+  | { readonly type: "saveUiPrefs"; readonly prefs: UiPrefsView };
 
 /** Messages the extension host sends to the webview. */
 export type OutboundMessage =
@@ -38,6 +45,7 @@ export type OutboundMessage =
       readonly availableLabels: readonly string[];
       readonly availableAssignableUsers: readonly string[];
     }
+  | { readonly type: "uiPrefs"; readonly prefs: UiPrefsView }
   | { readonly type: "repositoryOptions"; readonly options: readonly RepositoryOptionView[] }
   | { readonly type: "selectIssue"; readonly id: string }
   | { readonly type: "openNewIssueForm" }
