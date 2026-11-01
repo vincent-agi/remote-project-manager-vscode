@@ -9,6 +9,10 @@ function makeClient(overrides: Partial<GitlabClient> = {}): GitlabClient {
       create: vi.fn(),
       edit: vi.fn(),
     },
+    IssueNotes: {
+      all: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+    },
     ProjectMilestones: {
       all: vi.fn().mockResolvedValue([]),
       show: vi.fn(),
@@ -389,5 +393,64 @@ describe("GitlabProvider.getCapabilities", () => {
     const capabilities = await provider.getCapabilities();
 
     expect(capabilities.canWriteIssues).toBe(true);
+  });
+});
+
+describe("GitlabProvider comments", () => {
+  const note = (id: number, createdAt: string, extra: object = {}) => ({
+    id,
+    author: { username: "tanuki" },
+    body: `note ${id}`,
+    created_at: createdAt,
+    ...extra,
+  });
+
+  it("lists user notes oldest first and skips system notes", async () => {
+    const all = vi
+      .fn()
+      .mockResolvedValue([
+        note(3, "2026-03-01T00:00:00Z"),
+        note(1, "2026-01-01T00:00:00Z"),
+        note(2, "2026-02-01T00:00:00Z", { system: true }),
+      ]);
+    const client = makeClient();
+    client.IssueNotes.all = all;
+    const provider = new GitlabProvider(client, "acme/widgets");
+
+    const comments = await provider.listComments("acme/widgets#42");
+
+    expect(all).toHaveBeenCalledWith("acme/widgets", 42);
+    expect(comments.map((comment) => comment.id)).toEqual(["1", "3"]);
+    expect(comments[0]).toEqual({
+      id: "1",
+      author: "tanuki",
+      body: "note 1",
+      createdAt: "2026-01-01T00:00:00Z",
+    });
+  });
+
+  it("posts a note and maps it", async () => {
+    const create = vi.fn().mockResolvedValue(note(7, "2026-04-01T00:00:00Z"));
+    const client = makeClient();
+    client.IssueNotes.create = create;
+
+    const comment = await new GitlabProvider(client, "acme/widgets").addComment(
+      "acme/widgets#42",
+      "hi",
+    );
+
+    expect(create).toHaveBeenCalledWith("acme/widgets", 42, "hi");
+    expect(comment.id).toBe("7");
+  });
+
+  it("falls back to 'ghost' for a deleted author", async () => {
+    const client = makeClient();
+    client.IssueNotes.all = vi
+      .fn()
+      .mockResolvedValue([note(1, "2026-01-01T00:00:00Z", { author: null })]);
+    const [comment] = await new GitlabProvider(client, "acme/widgets").listComments(
+      "acme/widgets#42",
+    );
+    expect(comment.author).toBe("ghost");
   });
 });

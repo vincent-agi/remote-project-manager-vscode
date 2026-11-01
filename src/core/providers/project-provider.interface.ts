@@ -1,3 +1,4 @@
+import type { IComment } from "../models/comment.model";
 import type { IIssue, IssueState } from "../models/issue.model";
 import type { IMilestone, MilestoneState } from "../models/milestone.model";
 
@@ -77,6 +78,10 @@ export interface IProjectProvider {
   getIssue(id: string): Promise<IIssue>;
   createIssue(input: CreateIssueInput): Promise<IIssue>;
   updateIssue(id: string, patch: UpdateIssueInput): Promise<IIssue>;
+
+  /** Human comments on an issue, oldest first (system/bot activity notes excluded). */
+  listComments(issueId: string): Promise<readonly IComment[]>;
+  addComment(issueId: string, body: string): Promise<IComment>;
 
   listMilestones(options?: FetchOptions): Promise<readonly IMilestone[]>;
   getMilestone(id: string): Promise<IMilestone>;

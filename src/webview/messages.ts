@@ -1,3 +1,4 @@
+import type { IComment } from "../core/models/comment.model";
 import type { IIssue, ProviderKind } from "../core/models/issue.model";
 import type { IMilestone } from "../core/models/milestone.model";
 import type {
@@ -42,7 +43,9 @@ export type InboundMessage =
   | { readonly type: "createBranchForIssue"; readonly id: string }
   | { readonly type: "saveUiPrefs"; readonly prefs: UiPrefsView }
   | { readonly type: "reconnect" }
-  | { readonly type: "requestIssueTemplates" };
+  | { readonly type: "requestIssueTemplates" }
+  | { readonly type: "requestComments"; readonly issueId: string }
+  | { readonly type: "addComment"; readonly issueId: string; readonly body: string };
 
 /** Messages the extension host sends to the webview. */
 export type OutboundMessage =
@@ -58,6 +61,7 @@ export type OutboundMessage =
       readonly dataFetchedAt?: number;
     }
   | { readonly type: "uiPrefs"; readonly prefs: UiPrefsView }
+  | { readonly type: "comments"; readonly issueId: string; readonly comments: readonly IComment[] }
   | { readonly type: "issueTemplates"; readonly templates: readonly IssueTemplateView[] }
   | { readonly type: "repositoryOptions"; readonly options: readonly RepositoryOptionView[] }
   | { readonly type: "selectIssue"; readonly id: string }

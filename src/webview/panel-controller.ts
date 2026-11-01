@@ -73,6 +73,31 @@ export class PanelController {
   async handleMessage(message: InboundMessage): Promise<void> {
     try {
       switch (message.type) {
+        case "requestComments":
+          this.postMessage({
+            type: "comments",
+            issueId: message.issueId,
+            comments: await this.provider.listComments(message.issueId),
+          });
+          return;
+        case "addComment": {
+          const body = message.body.trim();
+          if (!body) {
+            this.postMessage({ type: "error", message: "A comment cannot be empty." });
+            return;
+          }
+          await this.guardWrite("canWriteIssues");
+          await this.provider.addComment(message.issueId, body);
+          this.postMessage({ type: "actionSuccess", message: "Comment added." });
+          this.postMessage({
+            type: "comments",
+            issueId: message.issueId,
+            comments: await this.provider.listComments(message.issueId),
+          });
+          // The issue's comment count changed too.
+          await this.sendState();
+          return;
+        }
         case "requestIssueTemplates":
           if (this.loadIssueTemplates) {
             this.postMessage({

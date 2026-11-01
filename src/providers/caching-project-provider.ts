@@ -1,4 +1,5 @@
 import { TtlCache } from "../core/cache/ttl-cache";
+import type { IComment } from "../core/models/comment.model";
 import type { IIssue } from "../core/models/issue.model";
 import type { IMilestone } from "../core/models/milestone.model";
 import type {
@@ -102,6 +103,18 @@ export class CachingProjectProvider implements IProjectProvider, IFetchTimestamp
 
   async createIssue(input: CreateIssueInput): Promise<IIssue> {
     const result = await this.inner.createIssue(input);
+    this.cache.invalidate(ISSUES_KEY);
+    return result;
+  }
+
+  /** Comments are read straight through: they change often and are fetched one issue at a time. */
+  listComments(issueId: string): Promise<readonly IComment[]> {
+    return this.inner.listComments(issueId);
+  }
+
+  /** A new comment changes the issue's comment count, so the cached issue list is stale. */
+  async addComment(issueId: string, body: string): Promise<IComment> {
+    const result = await this.inner.addComment(issueId, body);
     this.cache.invalidate(ISSUES_KEY);
     return result;
   }

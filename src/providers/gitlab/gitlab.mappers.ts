@@ -1,3 +1,4 @@
+import type { IComment } from "../../core/models/comment.model";
 import type { IIssue, IssueState } from "../../core/models/issue.model";
 import type { IMilestone, MilestoneState } from "../../core/models/milestone.model";
 
@@ -98,5 +99,24 @@ export function mapGitlabMilestoneToDomain(raw: RawGitlabMilestone): IMilestone 
     provider: "gitlab",
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
+  };
+}
+
+/** Minimal shape of a GitLab issue note, limited to fields we map. */
+export interface RawGitlabNote {
+  readonly id: number;
+  readonly author: { username: string } | null;
+  readonly body: string;
+  readonly created_at: string;
+  /** True for activity notes ("changed the description", "added label"). */
+  readonly system?: boolean;
+}
+
+export function mapGitlabNoteToDomain(raw: RawGitlabNote): IComment {
+  return {
+    id: String(raw.id),
+    author: raw.author?.username ?? "ghost",
+    body: raw.body,
+    createdAt: raw.created_at,
   };
 }

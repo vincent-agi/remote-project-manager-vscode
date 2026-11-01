@@ -7,6 +7,8 @@
 import { hasStateChanged } from "./state-diff.js";
 import { BOARD_COLUMNS, buildBoard, planBoardMove, type BoardColumnId } from "./board-model.js";
 import { describeCacheAge } from "./cache-age.js";
+import { markSeen, readSeenComments, unseenComments, type SeenComments } from "./comment-state.js";
+import { renderMarkdown } from "./markdown.js";
 import { enhanceMarkdownEditor } from "./markdown-editor.js";
 import { moveSelection, shortcutFor, SHORTCUT_HELP } from "./keyboard-shortcuts.js";
 import {
@@ -33,6 +35,14 @@ import {
   type IssueSort,
   type SavedFilter,
 } from "./issue-view-model.js";
+
+interface CommentView {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  url?: string;
+}
 
 interface IssueTemplateView {
   name: string;
@@ -109,6 +119,7 @@ type OutboundMessage =
     }
   | { type: "uiPrefs"; prefs: Record<string, unknown> }
   | { type: "issueTemplates"; templates: IssueTemplateView[] }
+  | { type: "comments"; issueId: string; comments: CommentView[] }
   | { type: "repositoryOptions"; options: RepositoryOptionView[] }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
@@ -142,7 +153,9 @@ type InboundMessage =
   | { type: "createBranchForIssue"; id: string }
   | { type: "saveUiPrefs"; prefs: Record<string, unknown> }
   | { type: "reconnect" }
-  | { type: "requestIssueTemplates" };
+  | { type: "requestIssueTemplates" }
+  | { type: "requestComments"; issueId: string }
+  | { type: "addComment"; issueId: string; body: string };
 
 declare function acquireVsCodeApi(): {
   postMessage(message: InboundMessage): void;
@@ -168,6 +181,12 @@ let uiPrefs: Record<string, unknown> = {};
 let savedFilters: SavedFilter[] = [];
 let visibleIssueIds: string[] = [];
 let issueTemplates: IssueTemplateView[] = [];
+let seenComments: SeenComments = {};
+const commentsByIssue = new Map<string, CommentView[]>();
+/** Comment count each cached comment list was fetched at, to spot new ones after a refresh. */
+const commentsFetchedAtCount = new Map<string, number>();
+const commentRequestsInFlight = new Set<string>();
+let commentSubmitIssueId: string | null = null;
 let templatesRequested = false;
 let issueSort: IssueSort = "default";
 let issueGroup: IssueGroup = "none";
@@ -209,6 +228,11 @@ function showError(message: string, authError = false): void {
     errorTimer = window.setTimeout(clearError, 5000);
   }
   banner.hidden = false;
+  commentSubmitIssueId = null;
+  const commentButton = document.getElementById("comment-add") as HTMLButtonElement | null;
+  if (commentButton) {
+    commentButton.disabled = false;
+  }
   setRefreshing(false);
   // A failure before the first state would otherwise leave skeletons pulsing forever.
   document.querySelectorAll(".skeleton-row").forEach((row) => row.remove());
@@ -339,7 +363,15 @@ function renderIssueList(): void {
       item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
       item.dataset.issueId = issue.id;
       const stateClass = issue.state === "closed" ? " state-closed" : "";
-      item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}`;
+      const unseen =
+        issue.id === selectedIssueId
+          ? 0
+          : unseenComments(seenComments, issue.id, issue.commentsCount);
+      const newComments =
+        unseen > 0
+          ? `<span class="badge new-comments" title="${unseen} new comment${unseen === 1 ? "" : "s"}">+${unseen} &#128172;</span>`
+          : "";
+      item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}${newComments}`;
       item.addEventListener("click", () => {
         selectedIssueId = issue.id;
         showNewIssueForm = false;
@@ -459,6 +491,54 @@ function renderNewIssueForm(): void {
   });
 }
 
+/** Renders the cached comments of `issue` (or a loading note) and fetches them when stale. */
+function showCommentsFor(issue: IssueView): void {
+  // Opening an issue marks its comments as seen; only re-render the list when that changed anything.
+  const nextSeen = markSeen(seenComments, issue.id, issue.commentsCount);
+  if (nextSeen !== seenComments) {
+    seenComments = nextSeen;
+    uiPrefs = { ...uiPrefs, seenComments };
+    post({ type: "saveUiPrefs", prefs: uiPrefs });
+    renderIssueList();
+  }
+
+  const cached = commentsByIssue.get(issue.id);
+  const stale = commentsFetchedAtCount.get(issue.id) !== issue.commentsCount;
+  renderComments(issue.id);
+  if ((!cached || stale) && !commentRequestsInFlight.has(issue.id)) {
+    commentRequestsInFlight.add(issue.id);
+    post({ type: "requestComments", issueId: issue.id });
+  }
+}
+
+function renderComments(issueId: string): void {
+  const container = document.getElementById("issue-comments");
+  if (!container || selectedIssueId !== issueId) {
+    return;
+  }
+  const comments = commentsByIssue.get(issueId);
+  if (!comments) {
+    container.textContent = "Loading comments…";
+    return;
+  }
+  if (comments.length === 0) {
+    container.innerHTML = `<p class="read-only-note">No comments yet.</p>`;
+    return;
+  }
+  container.innerHTML = comments
+    .map(
+      (comment) => `<article class="comment">
+        <header><strong>${escapeHtml(comment.author)}</strong> <span class="comment-date">${formatDate(comment.createdAt)}</span>${
+          comment.url
+            ? ` <a href="${escapeAttr(safeHref(comment.url))}" target="_blank" rel="noopener noreferrer">link</a>`
+            : ""
+        }</header>
+        <div class="md-preview">${renderMarkdown(comment.body)}</div>
+      </article>`,
+    )
+    .join("");
+}
+
 function renderIssueDetail(): void {
   const detail = byId<HTMLDivElement>("issue-detail");
   if (showNewIssueForm) {
@@ -552,9 +632,33 @@ function renderIssueDetail(): void {
 
     <button id="issue-save" ${canWrite ? "" : "disabled"}>Save</button>
     ${canWrite ? "" : '<p class="read-only-note">Your account does not have write access to issues.</p>'}
+
+    <h3>Comments (${issue.commentsCount})</h3>
+    <div id="issue-comments" aria-live="polite"></div>
+    ${
+      canWrite
+        ? `<label for="comment-body">Add a comment</label>
+    <textarea id="comment-body"></textarea>
+    <button id="comment-add" type="button">Comment</button>`
+        : ""
+    }
   `;
 
   enhanceMarkdownEditor(byId<HTMLTextAreaElement>("issue-body"), markdownSources);
+  if (canWrite) {
+    enhanceMarkdownEditor(byId<HTMLTextAreaElement>("comment-body"), markdownSources);
+    byId<HTMLButtonElement>("comment-add").addEventListener("click", () => {
+      const body = byId<HTMLTextAreaElement>("comment-body").value;
+      if (!body.trim()) {
+        showError("A comment cannot be empty.");
+        return;
+      }
+      commentSubmitIssueId = issue.id;
+      byId<HTMLButtonElement>("comment-add").disabled = true;
+      post({ type: "addComment", issueId: issue.id, body });
+    });
+  }
+  showCommentsFor(issue);
 
   byId<HTMLButtonElement>("issue-create-branch").addEventListener("click", () => {
     post({ type: "createBranchForIssue", id: issue.id });
@@ -1271,11 +1375,32 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     setIssueFilter({ ...issueFilter, milestone: null });
     setActiveTab("issues");
     renderIssueDetail();
+  } else if (message.type === "comments") {
+    commentRequestsInFlight.delete(message.issueId);
+    commentsByIssue.set(message.issueId, message.comments);
+    commentsFetchedAtCount.set(
+      message.issueId,
+      currentIssues.find((candidate) => candidate.id === message.issueId)?.commentsCount ??
+        message.comments.length,
+    );
+    if (commentSubmitIssueId === message.issueId) {
+      commentSubmitIssueId = null;
+      const box = document.getElementById("comment-body") as HTMLTextAreaElement | null;
+      if (box) {
+        box.value = "";
+      }
+      const button = document.getElementById("comment-add") as HTMLButtonElement | null;
+      if (button) {
+        button.disabled = false;
+      }
+    }
+    renderComments(message.issueId);
   } else if (message.type === "issueTemplates") {
     issueTemplates = message.templates;
   } else if (message.type === "uiPrefs") {
     uiPrefs = { ...message.prefs };
     savedFilters = readSavedFilters(uiPrefs);
+    seenComments = readSeenComments(uiPrefs);
     ({ sort: issueSort, group: issueGroup } = readListPrefs(uiPrefs));
     syncFilterControls();
     renderIssueList();
