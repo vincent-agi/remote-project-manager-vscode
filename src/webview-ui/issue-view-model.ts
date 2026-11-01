@@ -1,3 +1,5 @@
+import { identityTranslate, type Translate } from "./i18n.js";
+
 /** The fields of an issue the list view reads. */
 export interface IssueLike {
   readonly id: string;
@@ -47,6 +49,20 @@ export const PRESET_FILTERS: readonly SavedFilter[] = [
   { name: "Open issues", filter: { ...EMPTY_FILTER, state: "open" } },
   { name: "No milestone", filter: { ...EMPTY_FILTER, milestone: NO_MILESTONE } },
 ];
+
+/** Display name of a built-in filter; saved filters keep the name the user gave them. */
+export function describePreset(name: string, t: Translate = identityTranslate): string {
+  switch (name) {
+    case "My open issues":
+      return t("My open issues");
+    case "Open issues":
+      return t("Open issues");
+    case "No milestone":
+      return t("No milestone");
+    default:
+      return name;
+  }
+}
 
 function includesIgnoreCase(haystack: string, needle: string): boolean {
   return haystack.toLowerCase().includes(needle);
@@ -177,24 +193,76 @@ export type IssueSort =
   "default" | "updated" | "created" | "number-desc" | "number-asc" | "title" | "priority";
 export type IssueGroup = "none" | "milestone" | "label" | "state" | "assignee" | "priority";
 
-export const ISSUE_SORTS: readonly { value: IssueSort; label: string }[] = [
-  { value: "default", label: "Default order" },
-  { value: "updated", label: "Recently updated" },
-  { value: "created", label: "Recently created" },
-  { value: "number-desc", label: "Number (newest first)" },
-  { value: "number-asc", label: "Number (oldest first)" },
-  { value: "title", label: "Title (A–Z)" },
-  { value: "priority", label: "Priority" },
+export const ISSUE_SORTS: readonly IssueSort[] = [
+  "default",
+  "updated",
+  "created",
+  "number-desc",
+  "number-asc",
+  "title",
+  "priority",
 ];
 
-export const ISSUE_GROUPS: readonly { value: IssueGroup; label: string }[] = [
-  { value: "none", label: "No grouping" },
-  { value: "milestone", label: "Group by milestone" },
-  { value: "label", label: "Group by label" },
-  { value: "state", label: "Group by state" },
-  { value: "assignee", label: "Group by assignee" },
-  { value: "priority", label: "Group by priority" },
+export const ISSUE_GROUPS: readonly IssueGroup[] = [
+  "none",
+  "milestone",
+  "label",
+  "state",
+  "assignee",
+  "priority",
 ];
+
+export function describeSort(sort: IssueSort, t: Translate = identityTranslate): string {
+  switch (sort) {
+    case "default":
+      return t("Default order");
+    case "updated":
+      return t("Recently updated");
+    case "created":
+      return t("Recently created");
+    case "number-desc":
+      return t("Number (newest first)");
+    case "number-asc":
+      return t("Number (oldest first)");
+    case "title":
+      return t("Title (A–Z)");
+    case "priority":
+      return t("Priority");
+  }
+}
+
+export function describeGroup(group: IssueGroup, t: Translate = identityTranslate): string {
+  switch (group) {
+    case "none":
+      return t("No grouping");
+    case "milestone":
+      return t("Group by milestone");
+    case "label":
+      return t("Group by label");
+    case "state":
+      return t("Group by state");
+    case "assignee":
+      return t("Group by assignee");
+    case "priority":
+      return t("Group by priority");
+  }
+}
+
+/** Display name of a priority title produced by {@link priorityOf}. */
+export function describePriority(title: string, t: Translate = identityTranslate): string {
+  switch (title) {
+    case "Critical":
+      return t("Critical");
+    case "High":
+      return t("High");
+    case "Medium":
+      return t("Medium");
+    case "Low":
+      return t("Low");
+    default:
+      return title;
+  }
+}
 
 /** Rank of an issue with no recognizable priority label: after every ranked one. */
 export const NO_PRIORITY_RANK = 99;
@@ -286,6 +354,7 @@ export function groupIssues<T extends IssueLike>(
   issues: readonly T[],
   group: IssueGroup,
   milestoneTitles: ReadonlyMap<string, string>,
+  t: Translate = identityTranslate,
 ): IssueGroupSection<T>[] {
   if (group === "none") {
     return [{ key: "", title: "", issues: [...issues] }];
@@ -301,29 +370,29 @@ export function groupIssues<T extends IssueLike>(
       case "milestone":
         key = issue.milestoneId ?? NONE;
         title = issue.milestoneId
-          ? (milestoneTitles.get(issue.milestoneId) ?? "Unknown milestone")
-          : "No milestone";
+          ? (milestoneTitles.get(issue.milestoneId) ?? t("Unknown milestone"))
+          : t("No milestone");
         order = issue.milestoneId ? title.toLowerCase() : NONE;
         break;
       case "label":
         key = issue.labels[0] ?? NONE;
-        title = issue.labels[0] ?? "No label";
+        title = issue.labels[0] ?? t("No label");
         order = issue.labels[0]?.toLowerCase() ?? NONE;
         break;
       case "state":
         key = issue.state;
-        title = issue.state === "open" ? "Open" : "Closed";
+        title = issue.state === "open" ? t("Open") : t("Closed");
         order = issue.state === "open" ? "0" : "1";
         break;
       case "assignee":
         key = issue.assignees[0] ?? NONE;
-        title = issue.assignees[0] ?? "Unassigned";
+        title = issue.assignees[0] ?? t("Unassigned");
         order = issue.assignees[0]?.toLowerCase() ?? NONE;
         break;
       case "priority": {
         const priority = priorityOf(issue.labels);
         key = priority?.title ?? NONE;
-        title = priority?.title ?? "No priority";
+        title = priority ? describePriority(priority.title, t) : t("No priority");
         order = priority ? String(priority.rank) : NONE;
         break;
       }
@@ -346,7 +415,7 @@ export function readListPrefs(prefs: Readonly<Record<string, unknown>>): {
   sort: IssueSort;
   group: IssueGroup;
 } {
-  const sort = ISSUE_SORTS.find((entry) => entry.value === prefs.issueSort)?.value ?? "default";
-  const group = ISSUE_GROUPS.find((entry) => entry.value === prefs.issueGroup)?.value ?? "none";
+  const sort = ISSUE_SORTS.find((entry) => entry === prefs.issueSort) ?? "default";
+  const group = ISSUE_GROUPS.find((entry) => entry === prefs.issueGroup) ?? "none";
   return { sort, group };
 }

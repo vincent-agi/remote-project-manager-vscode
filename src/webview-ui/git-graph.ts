@@ -2,6 +2,7 @@
 // are mirrored by hand from src/git-graph-panel.ts (separate rootDir).
 
 import { layoutGraph } from "./graph-layout.js";
+import { setLanguage, t } from "./i18n.js";
 import { renderGraphRowSvg } from "./graph-svg.js";
 
 interface GraphCommitView {
@@ -30,6 +31,7 @@ type InboundMessage =
 
 declare function acquireVsCodeApi(): { postMessage(message: InboundMessage): void };
 const vscodeApi = acquireVsCodeApi();
+setLanguage(document.documentElement.lang);
 
 const NO_ISSUE_FILTER = "";
 const UNLINKED_FILTER = "unlinked";
@@ -84,8 +86,8 @@ function renderFilterOptions(): void {
     ),
   ].sort((a, b) => b - a);
   select.innerHTML =
-    `<option value="${NO_ISSUE_FILTER}">All commits</option>` +
-    `<option value="${UNLINKED_FILTER}">Not linked to an issue</option>` +
+    `<option value="${NO_ISSUE_FILTER}">${escapeHtml(t("All commits"))}</option>` +
+    `<option value="${UNLINKED_FILTER}">${escapeHtml(t("Not linked to an issue"))}</option>` +
     numbers
       .map((number) => {
         const title = issueTitles.get(number);
@@ -98,10 +100,13 @@ function renderFilterOptions(): void {
 function render(): void {
   const list = byId<HTMLDivElement>("graph");
   const shown = visibleCommits();
-  byId<HTMLParagraphElement>("graph-note").textContent =
-    `${shown.length} of ${commits.length} commits (all branches). Click a commit to see its changes.`;
+  byId<HTMLParagraphElement>("graph-note").textContent = t(
+    "{0} of {1} commits (all branches). Click a commit to see its changes.",
+    shown.length,
+    commits.length,
+  );
   if (shown.length === 0) {
-    list.innerHTML = `<p class="empty-state">No commits match.</p>`;
+    list.innerHTML = `<p class="empty-state">${escapeHtml(t("No commits match."))}</p>`;
     return;
   }
   // The layout is recomputed on the filtered list: parents that were

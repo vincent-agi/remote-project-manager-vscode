@@ -79,7 +79,7 @@ export class IssueStatusBar implements vscode.Disposable {
   }
 
   private render(): void {
-    const model = buildStatusBarModel(this.branch, this.sync);
+    const model = buildStatusBarModel(this.branch, this.sync, vscode.l10n.t);
     if (!model.visible) {
       this.item.hide();
       return;
@@ -88,7 +88,7 @@ export class IssueStatusBar implements vscode.Disposable {
     this.item.tooltip = model.tooltip;
     this.item.command = {
       command: model.command,
-      title: "Open",
+      title: vscode.l10n.t("Open"),
       arguments: [...model.commandArguments],
     };
     this.item.backgroundColor =

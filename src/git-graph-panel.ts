@@ -154,7 +154,10 @@ export function openGitGraph(
     } catch (error) {
       void panel.webview.postMessage({
         type: "error",
-        message: `Could not read git history: ${error instanceof Error ? error.message : String(error)}`,
+        message: vscode.l10n.t(
+          "Could not read git history: {0}",
+          error instanceof Error ? error.message : String(error),
+        ),
       });
     }
   };
@@ -169,7 +172,10 @@ export function openGitGraph(
         if (commit) {
           void openCommitDiff(gitService, cwd, commit).catch((error: unknown) => {
             void vscode.window.showErrorMessage(
-              `Could not open the diff: ${error instanceof Error ? error.message : String(error)}`,
+              vscode.l10n.t(
+                "Could not open the diff: {0}",
+                error instanceof Error ? error.message : String(error),
+              ),
             );
           });
         }
@@ -177,7 +183,9 @@ export function openGitGraph(
       }
       case "copyHash":
         void vscode.env.clipboard.writeText(message.hash).then(() => {
-          void vscode.window.showInformationMessage(`Copied ${message.hash.slice(0, 7)}.`);
+          void vscode.window.showInformationMessage(
+            vscode.l10n.t("Copied {0}.", message.hash.slice(0, 7)),
+          );
         });
         return;
     }

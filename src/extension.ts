@@ -90,8 +90,11 @@ function makeCredentialStore(secrets: vscode.SecretStorage): ICredentialStore {
 
 async function promptForToken(provider: ProviderKind): Promise<string | undefined> {
   return vscode.window.showInputBox({
-    title: `${provider === "github" ? "GitHub" : "GitLab"} Personal Access Token`,
-    prompt: `Enter a ${provider} personal access token with repo/issue read-write scope.`,
+    title: vscode.l10n.t("{0} Personal Access Token", provider === "github" ? "GitHub" : "GitLab"),
+    prompt: vscode.l10n.t(
+      "Enter a {0} personal access token with repo/issue read-write scope.",
+      provider,
+    ),
     password: true,
     ignoreFocusOut: true,
   });
@@ -200,11 +203,14 @@ function toRepositoryOptionView(candidate: RepositoryCandidate): RepositoryOptio
 
 /** Asks the user how to proceed given a dirty working tree, via a modal. */
 async function promptDirtyWorkingTree(issueNumber: number): Promise<DirtyTreeDecision> {
-  const stashChoice = "Stash & Continue";
-  const forceChoice = "Force Switch";
-  const cancelChoice = "Cancel";
+  const stashChoice = vscode.l10n.t("Stash & Continue");
+  const forceChoice = vscode.l10n.t("Force Switch");
+  const cancelChoice = vscode.l10n.t("Cancel");
   const choice = await vscode.window.showWarningMessage(
-    `Your working tree has uncommitted changes. Creating a branch for issue #${issueNumber} will switch branches.`,
+    vscode.l10n.t(
+      "Your working tree has uncommitted changes. Creating a branch for issue #{0} will switch branches.",
+      issueNumber,
+    ),
     { modal: true },
     stashChoice,
     forceChoice,
@@ -228,15 +234,22 @@ function reportBranchCreationOutcome(
 ): void {
   switch (result.status) {
     case "created":
-      void vscode.window.showInformationMessage(`Switched to new branch '${result.branchName}'.`);
+      void vscode.window.showInformationMessage(
+        vscode.l10n.t("Switched to new branch '{0}'.", result.branchName),
+      );
       break;
     case "invalid-name":
       void vscode.window.showErrorMessage(
-        `Generated branch name '${result.branchName}' is not a valid git ref. Check 'remoteProjectManager.branchNamePattern'.`,
+        vscode.l10n.t(
+          "Generated branch name '{0}' is not a valid git ref. Check 'remoteProjectManager.branchNamePattern'.",
+          result.branchName,
+        ),
       );
       break;
     case "error":
-      void vscode.window.showErrorMessage(`Could not create branch: ${result.message}`);
+      void vscode.window.showErrorMessage(
+        vscode.l10n.t("Could not create branch: {0}", result.message),
+      );
       break;
     case "cancelled":
       break;
@@ -254,7 +267,10 @@ async function pickBaseBranch(
   cwd: string,
 ): Promise<string | undefined> {
   const branches = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: "Fetching branches from origin…" },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: vscode.l10n.t("Fetching branches from origin…"),
+    },
     async () => {
       await gitService.fetch(cwd);
       return gitService.listBranches(cwd);
@@ -270,8 +286,8 @@ async function pickBaseBranch(
     : branches;
 
   return vscode.window.showQuickPick(ordered, {
-    title: "Base branch",
-    placeHolder: "Branch to create the new branch from",
+    title: vscode.l10n.t("Base branch"),
+    placeHolder: vscode.l10n.t("Branch to create the new branch from"),
   });
 }
 
@@ -454,7 +470,11 @@ async function buildController(
 
       if (!autoBranchEnabled || !folderPath) {
         void vscode.window.showInformationMessage(
-          `Issue #${issue.number} moved to in-progress. Suggested branch: ${generateBranchName(issue, pattern)}`,
+          vscode.l10n.t(
+            "Issue #{0} moved to in-progress. Suggested branch: {1}",
+            issue.number,
+            generateBranchName(issue, pattern),
+          ),
         );
         return;
       }
@@ -469,32 +489,41 @@ async function buildController(
         .then(reportBranchCreationOutcome)
         .catch((error: unknown) => {
           void vscode.window.showErrorMessage(
-            `Could not create branch: ${error instanceof Error ? error.message : String(error)}`,
+            vscode.l10n.t(
+              "Could not create branch: {0}",
+              error instanceof Error ? error.message : String(error),
+            ),
           );
         });
     },
     (issue) => {
       if (!folderPath) {
         throw new Error(
-          "No workspace folder resolved for this repository; cannot create a branch.",
+          vscode.l10n.t(
+            "No workspace folder resolved for this repository; cannot create a branch.",
+          ),
         );
       }
       return requestCreateBranch(issue, folderPath, gitService, branchManager, pattern);
     },
     (issue) => {
+      const openLabel = vscode.l10n.t("Open");
       void vscode.window
         .showInformationMessage(
-          `You were assigned to issue #${issue.number}: ${issue.title}`,
-          "Open",
+          vscode.l10n.t("You were assigned to issue #{0}: {1}", issue.number, issue.title),
+          openLabel,
         )
         .then((choice) => {
-          if (choice === "Open") {
+          if (choice === openLabel) {
             void vscode.commands.executeCommand("remoteProjectManager.openIssueFromTree", issue.id);
           }
         })
         .then(undefined, (error: unknown) => {
           void vscode.window.showErrorMessage(
-            `Failed to show assignment notification: ${error instanceof Error ? error.message : String(error)}`,
+            vscode.l10n.t(
+              "Failed to show assignment notification: {0}",
+              error instanceof Error ? error.message : String(error),
+            ),
           );
         });
     },
@@ -505,7 +534,7 @@ async function buildController(
       reconnecting = true;
       void credentialStore.setToken(providerKind, "").then(() => {
         void vscode.window.showWarningMessage(
-          "Your GitLab session expired. Reopening the panel to reconnect...",
+          vscode.l10n.t("Your GitLab session expired. Reopening the panel to reconnect..."),
         );
         panel.dispose();
         void openPanel(context);
@@ -620,7 +649,9 @@ async function openPanelImpl(
 
   if (resolution.kind === "none") {
     void vscode.window.showErrorMessage(
-      "No GitHub/GitLab repository detected in this workspace. Set 'remoteProjectManager.repository' to 'owner/repo' manually.",
+      vscode.l10n.t(
+        "No GitHub/GitLab repository detected in this workspace. Set 'remoteProjectManager.repository' to 'owner/repo' manually.",
+      ),
     );
     return;
   }
@@ -722,6 +753,18 @@ async function openPanelImpl(
   });
 }
 
+/** Localized title of a tree group. */
+function describeGroup(status: MyIssueGroup["status"]): string {
+  switch (status) {
+    case "in-progress":
+      return vscode.l10n.t("In progress");
+    case "todo":
+      return vscode.l10n.t("To do");
+    case "blocked":
+      return vscode.l10n.t("Blocked");
+  }
+}
+
 /** Theme colour per priority rank (0 = critical .. 3 = low). */
 const PRIORITY_COLORS = ["charts.red", "charts.orange", "charts.yellow", "charts.blue"] as const;
 
@@ -785,7 +828,7 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
   getTreeItem(element: MyIssueSummary | MyIssueGroup): vscode.TreeItem {
     if ("kind" in element) {
       const group = new vscode.TreeItem(
-        `${element.label} (${element.issues.length})`,
+        `${describeGroup(element.status)} (${element.issues.length})`,
         vscode.TreeItemCollapsibleState.Expanded,
       );
       // A stable id lets VS Code remember each group's collapsed state.
@@ -810,8 +853,10 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
     const status = workStatusOf(element.labels);
     const priority = priorityOf(element.labels);
     item.id = element.id;
-    item.description = buildIssueDescription(element, milestoneTitle);
-    item.tooltip = new vscode.MarkdownString(buildIssueTooltip(element, milestoneTitle));
+    item.description = buildIssueDescription(element, milestoneTitle, vscode.l10n.t);
+    item.tooltip = new vscode.MarkdownString(
+      buildIssueTooltip(element, milestoneTitle, vscode.l10n.t),
+    );
     item.contextValue = "issue";
     item.iconPath = new vscode.ThemeIcon(
       status === "in-progress" ? "sync" : status === "blocked" ? "error" : "issues",
@@ -819,7 +864,7 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
     );
     item.command = {
       command: "remoteProjectManager.openIssueFromTree",
-      title: "Open Issue",
+      title: vscode.l10n.t("Open Issue"),
       arguments: [element.id],
     };
     return item;
@@ -1024,24 +1069,39 @@ async function signOutGitLab(
     activeProviderKind = undefined;
   }
   void vscode.window.showInformationMessage(
-    "Signed out of GitLab. You'll be prompted for a new token next time the panel connects to a GitLab repository.",
+    vscode.l10n.t(
+      "Signed out of GitLab. You'll be prompted for a new token next time the panel connects to a GitLab repository.",
+    ),
   );
 }
 
 /** Display text for each Conventional Commits type, shown in the compose-commit QuickPick. */
-const COMMIT_TYPE_DESCRIPTIONS: Record<CommitType, string> = {
-  feat: "A new feature",
-  fix: "A bug fix",
-  docs: "Documentation only changes",
-  style: "Formatting; no code meaning change",
-  refactor: "Neither fixes a bug nor adds a feature",
-  perf: "A performance improvement",
-  test: "Adding or correcting tests",
-  build: "Build system or external dependencies",
-  ci: "CI configuration or scripts",
-  chore: "Other changes (tooling, config, ...)",
-  revert: "Reverts a previous commit",
-};
+function describeCommitType(type: CommitType): string {
+  switch (type) {
+    case "feat":
+      return vscode.l10n.t("A new feature");
+    case "fix":
+      return vscode.l10n.t("A bug fix");
+    case "docs":
+      return vscode.l10n.t("Documentation only changes");
+    case "style":
+      return vscode.l10n.t("Formatting; no code meaning change");
+    case "refactor":
+      return vscode.l10n.t("Neither fixes a bug nor adds a feature");
+    case "perf":
+      return vscode.l10n.t("A performance improvement");
+    case "test":
+      return vscode.l10n.t("Adding or correcting tests");
+    case "build":
+      return vscode.l10n.t("Build system or external dependencies");
+    case "ci":
+      return vscode.l10n.t("CI configuration or scripts");
+    case "chore":
+      return vscode.l10n.t("Other changes (tooling, config, ...)");
+    case "revert":
+      return vscode.l10n.t("Reverts a previous commit");
+  }
+}
 
 let gitmojisCache: Gitmoji[] | undefined;
 
@@ -1067,8 +1127,8 @@ async function showGitmojiPicker(context: vscode.ExtensionContext): Promise<Gitm
       gitmoji,
     })),
     {
-      title: "Pick a Gitmoji",
-      placeHolder: "Search by code or description",
+      title: vscode.l10n.t("Pick a Gitmoji"),
+      placeHolder: vscode.l10n.t("Search by code or description"),
       matchOnDescription: true,
     },
   );
@@ -1197,7 +1257,7 @@ async function composeCommit(
   const cwd =
     scm?.rootUri?.fsPath ?? activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
-    void vscode.window.showErrorMessage("No workspace folder open.");
+    void vscode.window.showErrorMessage(vscode.l10n.t("No workspace folder open."));
     return;
   }
 
@@ -1223,18 +1283,21 @@ async function composeCommit(
       label: type,
       description:
         type === suggestedType
-          ? `${COMMIT_TYPE_DESCRIPTIONS[type]} (suggested from staged files)`
-          : COMMIT_TYPE_DESCRIPTIONS[type],
+          ? vscode.l10n.t("{0} (suggested from staged files)", describeCommitType(type))
+          : describeCommitType(type),
     })),
-    { title: "Commit type", placeHolder: "Conventional Commits type" },
+    {
+      title: vscode.l10n.t("Commit type"),
+      placeHolder: vscode.l10n.t("Conventional Commits type"),
+    },
   );
   if (!typePick) {
     return;
   }
 
   const scope = await vscode.window.showInputBox({
-    title: "Scope (optional)",
-    prompt: "e.g. 'commits', 'ui' — leave empty for none",
+    title: vscode.l10n.t("Scope (optional)"),
+    prompt: vscode.l10n.t("e.g. 'commits', 'ui' — leave empty for none"),
     value: suggestedScope,
   });
   if (scope === undefined) {
@@ -1247,8 +1310,8 @@ async function composeCommit(
   }
 
   const description = await vscode.window.showInputBox({
-    title: "Description",
-    prompt: "Short, imperative description of the change",
+    title: vscode.l10n.t("Description"),
+    prompt: vscode.l10n.t("Short, imperative description of the change"),
     validateInput: (value) => (value.trim() ? undefined : "Description is required."),
   });
   if (!description) {
@@ -1261,8 +1324,8 @@ async function composeCommit(
 
   if (issueNumber === undefined) {
     const manual = await vscode.window.showInputBox({
-      title: "Issue number (optional)",
-      prompt: "Leave empty for no issue reference",
+      title: vscode.l10n.t("Issue number (optional)"),
+      prompt: vscode.l10n.t("Leave empty for no issue reference"),
       validateInput: (value) =>
         value === "" || /^\d+$/.test(value) ? undefined : "Enter a number, or leave empty.",
     });
@@ -1280,17 +1343,17 @@ async function composeCommit(
       [
         {
           label: `Fixes #${issueNumber}`,
-          description: "Closes the issue on merge to the default branch",
+          description: vscode.l10n.t("Closes the issue on merge to the default branch"),
           refKind: "fixes" as const,
         },
         {
           label: `Refs #${issueNumber}`,
-          description: "References the issue without closing it",
+          description: vscode.l10n.t("References the issue without closing it"),
           refKind: "refs" as const,
         },
-        { label: "No issue reference", refKind: "none" as const },
+        { label: vscode.l10n.t("No issue reference"), refKind: "none" as const },
       ],
-      { title: `Link this commit to issue #${issueNumber}?` },
+      { title: vscode.l10n.t("Link this commit to issue #{0}?", issueNumber) },
     );
     if (!refPick) {
       return;
@@ -1311,12 +1374,12 @@ async function composeCommit(
   if (inputBox) {
     inputBox.value = message;
     void vscode.window.showInformationMessage(
-      "Commit message ready in the Source Control input box.",
+      vscode.l10n.t("Commit message ready in the Source Control input box."),
     );
   } else {
     await vscode.env.clipboard.writeText(message);
     void vscode.window.showInformationMessage(
-      "Commit message copied to clipboard (Git extension not available).",
+      vscode.l10n.t("Commit message copied to clipboard (Git extension not available)."),
     );
   }
 }
@@ -1336,7 +1399,7 @@ async function pickGitmojiCommand(context: vscode.ExtensionContext): Promise<voi
   }
   await vscode.env.clipboard.writeText(gitmoji.emoji);
   void vscode.window.showInformationMessage(
-    `Copied ${gitmoji.emoji} ${gitmoji.code} to clipboard.`,
+    vscode.l10n.t("Copied {0} {1} to clipboard.", gitmoji.emoji, gitmoji.code),
   );
 }
 
@@ -1351,7 +1414,9 @@ async function copyIssueContext(
   const connection = await getActiveConnection(context);
   if (!connection) {
     void vscode.window.showErrorMessage(
-      "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      vscode.l10n.t(
+        "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      ),
     );
     return;
   }
@@ -1368,7 +1433,10 @@ async function copyIssueContext(
         label: `#${candidate.number} ${candidate.title}`,
         issue: candidate,
       })),
-      { title: "Copy context for which issue?", placeHolder: "Type to filter" },
+      {
+        title: vscode.l10n.t("Copy context for which issue?"),
+        placeHolder: vscode.l10n.t("Type to filter"),
+      },
     );
     if (!picked) {
       return;
@@ -1380,7 +1448,9 @@ async function copyIssueContext(
   const contextBlock = formatIssueContext(issue, milestone);
   lastIssueContext = contextBlock;
   await vscode.env.clipboard.writeText(contextBlock);
-  void vscode.window.showInformationMessage(`Copied issue #${issue.number} context to clipboard.`);
+  void vscode.window.showInformationMessage(
+    vscode.l10n.t("Copied issue #{0} context to clipboard.", issue.number),
+  );
 }
 
 /**
@@ -1417,7 +1487,9 @@ async function createPrFromIssue(
   const connection = await getActiveConnection(context);
   if (!connection) {
     void vscode.window.showErrorMessage(
-      "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      vscode.l10n.t(
+        "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      ),
     );
     return;
   }
@@ -1429,7 +1501,9 @@ async function createPrFromIssue(
     : await resolveActiveIssueViaBranch(gitService, cwd, provider);
   if (!issue) {
     void vscode.window.showErrorMessage(
-      "Could not determine which issue this branch is for. Rename the branch to include the issue number (e.g. 'fix/53-description').",
+      vscode.l10n.t(
+        "Could not determine which issue this branch is for. Rename the branch to include the issue number (e.g. 'fix/53-description').",
+      ),
     );
     return;
   }
@@ -1445,17 +1519,25 @@ async function createPrFromIssue(
     commits = log.map((entry) => ({ hash: entry.hash, message: entry.message }));
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `Could not resolve branches or commits: ${error instanceof Error ? error.message : String(error)}`,
+      vscode.l10n.t(
+        "Could not resolve branches or commits: {0}",
+        error instanceof Error ? error.message : String(error),
+      ),
     );
     return;
   }
 
   if (element && extractIssueNumberFromBranch(currentBranch) !== issue.number) {
+    const continueLabel = vscode.l10n.t("Continue");
     const choice = await vscode.window.showWarningMessage(
-      `The current branch '${currentBranch}' does not reference issue #${issue.number}. Create the PR from it anyway?`,
-      "Continue",
+      vscode.l10n.t(
+        "The current branch '{0}' does not reference issue #{1}. Create the PR from it anyway?",
+        currentBranch,
+        issue.number,
+      ),
+      continueLabel,
     );
-    if (choice !== "Continue") {
+    if (choice !== continueLabel) {
       return;
     }
   }
@@ -1467,16 +1549,18 @@ async function createPrFromIssue(
   if (resolution.kind !== "resolved") {
     await vscode.env.clipboard.writeText(body);
     void vscode.window.showInformationMessage(
-      "Could not resolve the repository URL; PR body copied to clipboard instead.",
+      vscode.l10n.t("Could not resolve the repository URL; PR body copied to clipboard instead."),
     );
     return;
   }
 
   const title = await vscode.window.showInputBox({
-    title: "Pull request title",
-    prompt: "Generated from the branch's commits (Conventional Commits). Edit if needed.",
+    title: vscode.l10n.t("Pull request title"),
+    prompt: vscode.l10n.t(
+      "Generated from the branch's commits (Conventional Commits). Edit if needed.",
+    ),
     value: suggestedTitle,
-    validateInput: (value) => (value.trim() ? undefined : "Title is required."),
+    validateInput: (value) => (value.trim() ? undefined : vscode.l10n.t("Title is required.")),
   });
   if (title === undefined) {
     return;
@@ -1484,10 +1568,14 @@ async function createPrFromIssue(
 
   const stateChoice = await vscode.window.showQuickPick(
     [
-      { label: "Ready for review", draft: false },
-      { label: "Draft", description: "Not ready to be merged yet", draft: true },
+      { label: vscode.l10n.t("Ready for review"), draft: false },
+      {
+        label: vscode.l10n.t("Draft"),
+        description: vscode.l10n.t("Not ready to be merged yet"),
+        draft: true,
+      },
     ],
-    { title: "Create the pull request as" },
+    { title: vscode.l10n.t("Create the pull request as") },
   );
   if (!stateChoice) {
     return;
@@ -1499,11 +1587,15 @@ async function createPrFromIssue(
   let labels: string[] = [];
   if (resolution.providerKind === "github") {
     reviewers = await pickMany(
-      "Request review from (optional)",
+      vscode.l10n.t("Request review from (optional)"),
       () => provider.listAssignableUsers(),
       [],
     );
-    labels = await pickMany("Labels (optional)", () => provider.listLabels(), issue.labels);
+    labels = await pickMany(
+      vscode.l10n.t("Labels (optional)"),
+      () => provider.listLabels(),
+      issue.labels,
+    );
   }
 
   const gitlabHost =
@@ -1528,7 +1620,7 @@ async function createPrFromIssue(
 function showGitGraph(context: vscode.ExtensionContext): void {
   const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
-    void vscode.window.showErrorMessage("No workspace folder open.");
+    void vscode.window.showErrorMessage(vscode.l10n.t("No workspace folder open."));
     return;
   }
   openGitGraph(context, cwd, () => activeProvider);
@@ -1538,7 +1630,7 @@ function showGitGraph(context: vscode.ExtensionContext): void {
 async function lintCommitHistory(): Promise<void> {
   const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
-    void vscode.window.showErrorMessage("No workspace folder open.");
+    void vscode.window.showErrorMessage(vscode.l10n.t("No workspace folder open."));
     return;
   }
   const gitService = new SimpleGitService();
@@ -1547,7 +1639,10 @@ async function lintCommitHistory(): Promise<void> {
     log = await gitService.log(cwd, "-100");
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `Could not read git log: ${error instanceof Error ? error.message : String(error)}`,
+      vscode.l10n.t(
+        "Could not read git log: {0}",
+        error instanceof Error ? error.message : String(error),
+      ),
     );
     return;
   }
@@ -1557,7 +1652,9 @@ async function lintCommitHistory(): Promise<void> {
 
   if (violations.length === 0) {
     void vscode.window.showInformationMessage(
-      "All checked commits (last 100) comply with the Gitmoji/Conventional Commit convention.",
+      vscode.l10n.t(
+        "All checked commits (last 100) comply with the Gitmoji/Conventional Commit convention.",
+      ),
     );
     return;
   }
@@ -1572,8 +1669,10 @@ async function lintCommitHistory(): Promise<void> {
       violation,
     })),
     {
-      title: `${violations.length} non-compliant commit(s) in the last 100`,
-      placeHolder: "Pick one to copy its suggested message (never applied automatically)",
+      title: vscode.l10n.t("{0} non-compliant commit(s) in the last 100", violations.length),
+      placeHolder: vscode.l10n.t(
+        "Pick one to copy its suggested message (never applied automatically)",
+      ),
     },
   );
   if (!picked?.violation.suggestion) {
@@ -1582,7 +1681,10 @@ async function lintCommitHistory(): Promise<void> {
 
   await vscode.env.clipboard.writeText(picked.violation.suggestion);
   void vscode.window.showInformationMessage(
-    `Copied suggested message for ${picked.violation.hash.slice(0, 7)} to clipboard.`,
+    vscode.l10n.t(
+      "Copied suggested message for {0} to clipboard.",
+      picked.violation.hash.slice(0, 7),
+    ),
   );
 }
 
@@ -1591,7 +1693,9 @@ async function exportMilestoneContext(context: vscode.ExtensionContext): Promise
   const connection = await getActiveConnection(context);
   if (!connection) {
     void vscode.window.showErrorMessage(
-      "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      vscode.l10n.t(
+        "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      ),
     );
     return;
   }
@@ -1611,7 +1715,7 @@ async function exportMilestoneContext(context: vscode.ExtensionContext): Promise
         description: `#${candidate.number}`,
         milestone: candidate,
       })),
-      { title: "Export context for which milestone?" },
+      { title: vscode.l10n.t("Export context for which milestone?") },
     );
     if (!picked) {
       return;
@@ -1636,7 +1740,10 @@ async function exportMilestoneContext(context: vscode.ExtensionContext): Promise
   const safeSegments = resolveSafeRelativeSegments(relativePath);
   if (!safeSegments) {
     void vscode.window.showErrorMessage(
-      `'remoteProjectManager.aiContextFile' ("${relativePath}") escapes the workspace folder and was rejected.`,
+      vscode.l10n.t(
+        "'remoteProjectManager.aiContextFile' (\"{0}\") escapes the workspace folder and was rejected.",
+        relativePath,
+      ),
     );
     return;
   }
@@ -1655,7 +1762,9 @@ async function exportMilestoneContext(context: vscode.ExtensionContext): Promise
   await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(fileUri, ".."));
   await vscode.workspace.fs.writeFile(fileUri, Buffer.from(updated, "utf8"));
 
-  void vscode.window.showInformationMessage(`Exported milestone context to ${relativePath}.`);
+  void vscode.window.showInformationMessage(
+    vscode.l10n.t("Exported milestone context to {0}.", relativePath),
+  );
 }
 
 function readExtensionVersion(context: vscode.ExtensionContext): string {
@@ -1676,7 +1785,7 @@ async function readTextIfExists(uri: vscode.Uri): Promise<string | undefined> {
 async function installCommitMsgHook(): Promise<void> {
   const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
-    void vscode.window.showErrorMessage("No workspace folder open.");
+    void vscode.window.showErrorMessage(vscode.l10n.t("No workspace folder open."));
     return;
   }
   try {
@@ -1684,12 +1793,15 @@ async function installCommitMsgHook(): Promise<void> {
     const hookUri = vscode.Uri.joinPath(hooksDir, "commit-msg");
     const existing = await readTextIfExists(hookUri);
     if (classifyExistingHook(existing) === "foreign") {
+      const replaceLabel = vscode.l10n.t("Replace");
       const choice = await vscode.window.showWarningMessage(
-        "A commit-msg hook already exists. Replace it? The current one is kept as commit-msg.backup.",
+        vscode.l10n.t(
+          "A commit-msg hook already exists. Replace it? The current one is kept as commit-msg.backup.",
+        ),
         { modal: true },
-        "Replace",
+        replaceLabel,
       );
-      if (choice !== "Replace") {
+      if (choice !== replaceLabel) {
         return;
       }
       await vscode.workspace.fs.writeFile(
@@ -1701,11 +1813,14 @@ async function installCommitMsgHook(): Promise<void> {
     await vscode.workspace.fs.writeFile(hookUri, Buffer.from(buildCommitMsgHookScript(), "utf8"));
     await fs.chmod(hookUri.fsPath, 0o755);
     void vscode.window.showInformationMessage(
-      `Commit message hook installed in ${hookUri.fsPath}.`,
+      vscode.l10n.t("Commit message hook installed in {0}.", hookUri.fsPath),
     );
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `Could not install the commit message hook: ${error instanceof Error ? error.message : String(error)}`,
+      vscode.l10n.t(
+        "Could not install the commit message hook: {0}",
+        error instanceof Error ? error.message : String(error),
+      ),
     );
   }
 }
@@ -1714,7 +1829,7 @@ async function installCommitMsgHook(): Promise<void> {
 async function uninstallCommitMsgHook(): Promise<void> {
   const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
-    void vscode.window.showErrorMessage("No workspace folder open.");
+    void vscode.window.showErrorMessage(vscode.l10n.t("No workspace folder open."));
     return;
   }
   try {
@@ -1724,8 +1839,10 @@ async function uninstallCommitMsgHook(): Promise<void> {
     if (kind !== "managed") {
       void vscode.window.showInformationMessage(
         kind === "none"
-          ? "No commit-msg hook is installed."
-          : "The existing commit-msg hook was not installed by this extension; leaving it alone.",
+          ? vscode.l10n.t("No commit-msg hook is installed.")
+          : vscode.l10n.t(
+              "The existing commit-msg hook was not installed by this extension; leaving it alone.",
+            ),
       );
       return;
     }
@@ -1737,10 +1854,13 @@ async function uninstallCommitMsgHook(): Promise<void> {
       await fs.chmod(hookUri.fsPath, 0o755);
       await vscode.workspace.fs.delete(backupUri);
     }
-    void vscode.window.showInformationMessage("Commit message hook removed.");
+    void vscode.window.showInformationMessage(vscode.l10n.t("Commit message hook removed."));
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `Could not remove the commit message hook: ${error instanceof Error ? error.message : String(error)}`,
+      vscode.l10n.t(
+        "Could not remove the commit message hook: {0}",
+        error instanceof Error ? error.message : String(error),
+      ),
     );
   }
 }
@@ -1793,11 +1913,12 @@ async function runDiagnostics(context: vscode.ExtensionContext): Promise<void> {
   const report = formatDiagnosticsReport(input);
   logger.info(`\n${report}`);
   logger.show();
+  const copyLabel = vscode.l10n.t("Copy report");
   const choice = await vscode.window.showInformationMessage(
-    "Diagnostics written to the 'Remote Project Manager' output channel.",
-    "Copy report",
+    vscode.l10n.t("Diagnostics written to the 'Remote Project Manager' output channel."),
+    copyLabel,
   );
-  if (choice === "Copy report") {
+  if (choice === copyLabel) {
     await vscode.env.clipboard.writeText(report);
   }
 }
@@ -1810,7 +1931,9 @@ async function createBranchForTreeIssue(
   const connection = await getActiveConnection(context);
   if (!connection) {
     void vscode.window.showErrorMessage(
-      "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      vscode.l10n.t(
+        "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      ),
     );
     return;
   }

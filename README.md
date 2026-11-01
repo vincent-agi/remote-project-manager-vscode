@@ -145,6 +145,10 @@ The "active issue" for these commands is resolved from your current branch name 
 
 New to the extension? Run **Remote Project Manager: Open Walkthrough** (or click **Get Started** in the sidebar) for a guided tour: connect, pick your platform, create an issue, make a first commit.
 
+### Languages
+
+The extension follows VS Code's display language: English and French are provided (manifest, notifications, panel and Git Graph). To add a language, add `package.nls.<lang>.json` and `l10n/bundle.l10n.<lang>.json` next to the French ones, plus a table like the one in `src/webview-ui/translations.ts`; tests fail if a message is left untranslated or a placeholder is lost. The walkthrough pages in `media/walkthrough` are English only.
+
 ### Keyboard Shortcuts
 
 Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kbd>+<kbd>⌥</kbd>+<kbd>R</kbd> instead of <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>, followed by the second key:
