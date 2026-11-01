@@ -429,7 +429,7 @@
   "dependencies": {
     "@gitbeaker/rest": "^43.8.0",
     "@octokit/rest": "^22.0.1",
-    "simple-git": "^3.36.0"
+    "simple-git": "^4.0.1"
   },
   "l10n": "./l10n"
 }
