@@ -35,6 +35,11 @@ import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { StateSync } from "./state-sync";
+import {
+  describeAssignedBadge,
+  isPollDue,
+  normalizePollInterval,
+} from "./core/polling/poll-schedule";
 import { registerEditorIntegration } from "./editor-integration";
 import { logger } from "./logger";
 import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
@@ -693,6 +698,9 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
   }>();
   /** Fires with the connection state after every tree load, for the status bar. */
   readonly onDidSync = this.syncEmitter.event;
+  private readonly countEmitter = new vscode.EventEmitter<number>();
+  /** Fires with the number of open issues assigned to the user after every load. */
+  readonly onDidChangeAssignedCount = this.countEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -752,7 +760,9 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
         },
         folderPath,
       });
-      return selectMyOpenIssues(issues, connection.currentUser.username);
+      const mine = selectMyOpenIssues(issues, connection.currentUser.username);
+      this.countEmitter.fire(mine.length);
+      return mine;
     } catch (error) {
       logger.warn(
         isAuthError(error) ? "Sidebar: authentication failed" : "Sidebar: could not load issues",
@@ -1781,6 +1791,42 @@ async function createBranchForTreeIssue(
   }
 }
 
+/**
+ * Periodically refreshes the sidebar (and the open panel) so assigned
+ * issues and the activity-bar badge stay current without a manual
+ * Refresh. Polls only while the window is focused, catches up as soon as
+ * focus returns, and goes through the normal TTL cache, so the interval
+ * is also bounded below by `cacheTtlSeconds`.
+ */
+function startAutoRefresh(treeDataProvider: MyIssuesTreeDataProvider): vscode.Disposable {
+  let lastRunAt = Date.now();
+  const tick = (): void => {
+    const intervalSeconds = normalizePollInterval(
+      vscode.workspace.getConfiguration("remoteProjectManager").get<number>("autoRefreshSeconds"),
+    );
+    const now = Date.now();
+    if (
+      !isPollDue({ intervalSeconds, windowFocused: vscode.window.state.focused, lastRunAt, now })
+    ) {
+      return;
+    }
+    lastRunAt = now;
+    treeDataProvider.refresh();
+    void activeController?.handleMessage({ type: "requestState" });
+  };
+  // Finer than any allowed interval, so a due poll is never late by much.
+  const timer = setInterval(tick, 15_000);
+  const focusListener = vscode.window.onDidChangeWindowState((state) => {
+    if (state.focused) {
+      tick();
+    }
+  });
+  return new vscode.Disposable(() => {
+    clearInterval(timer);
+    focusListener.dispose();
+  });
+}
+
 /** API this extension exposes to other extensions (e.g. AI agents) via `extensions.getExtension(...).exports`. */
 export interface RemoteProjectManagerApi {
   /** The Markdown context block from the last "Copy Issue Context for AI" invocation, if any. */
@@ -1796,6 +1842,9 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     getActiveConnection: () => getActiveConnection(context),
     resolveRepository,
     refreshTree: () => treeDataProvider.refresh(),
+  });
+  const treeView = vscode.window.createTreeView("remoteProjectManager.sidebar", {
+    treeDataProvider,
   });
   const stateSync = new StateSync(
     context,
@@ -1888,7 +1937,11 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     vscode.commands.registerCommand("remoteProjectManager.exportMilestoneContext", () => {
       void exportMilestoneContext(context);
     }),
-    vscode.window.registerTreeDataProvider("remoteProjectManager.sidebar", treeDataProvider),
+    treeView,
+    treeDataProvider.onDidChangeAssignedCount((count) => {
+      treeView.badge = count > 0 ? describeAssignedBadge(count) : undefined;
+    }),
+    startAutoRefresh(treeDataProvider),
   );
 
   return {

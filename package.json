@@ -193,6 +193,12 @@
           "type": "boolean",
           "default": true,
           "description": "Show a CodeLens and clickable link on TODO/FIXME comments: the linked issue (TODO #12), or 'Create issue from TODO'."
+        },
+        "remoteProjectManager.autoRefreshSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 0,
+          "description": "How often (in seconds) to refresh the sidebar and the open panel while the window is focused. Values under 30 are raised to 30; 0 turns automatic refresh off. Reads still go through the cache (see cacheTtlSeconds)."
         }
       }
     },
