@@ -8,6 +8,8 @@ export interface IssueLike {
   readonly labels: readonly string[];
   readonly assignees: readonly string[];
   readonly milestoneId: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 /** Value of {@link IssueFilter.milestone} that selects issues with no milestone. */
@@ -169,4 +171,182 @@ export function sameFilter(a: IssueFilter, b: IssueFilter): boolean {
     a.state === b.state &&
     a.milestone === b.milestone
   );
+}
+
+export type IssueSort =
+  "default" | "updated" | "created" | "number-desc" | "number-asc" | "title" | "priority";
+export type IssueGroup = "none" | "milestone" | "label" | "state" | "assignee" | "priority";
+
+export const ISSUE_SORTS: readonly { value: IssueSort; label: string }[] = [
+  { value: "default", label: "Default order" },
+  { value: "updated", label: "Recently updated" },
+  { value: "created", label: "Recently created" },
+  { value: "number-desc", label: "Number (newest first)" },
+  { value: "number-asc", label: "Number (oldest first)" },
+  { value: "title", label: "Title (A–Z)" },
+  { value: "priority", label: "Priority" },
+];
+
+export const ISSUE_GROUPS: readonly { value: IssueGroup; label: string }[] = [
+  { value: "none", label: "No grouping" },
+  { value: "milestone", label: "Group by milestone" },
+  { value: "label", label: "Group by label" },
+  { value: "state", label: "Group by state" },
+  { value: "assignee", label: "Group by assignee" },
+  { value: "priority", label: "Group by priority" },
+];
+
+/** Rank of an issue with no recognizable priority label: after every ranked one. */
+export const NO_PRIORITY_RANK = 99;
+
+const PRIORITY_NAMES: Readonly<Record<string, { rank: number; title: string }>> = {
+  critical: { rank: 0, title: "Critical" },
+  urgent: { rank: 0, title: "Critical" },
+  blocker: { rank: 0, title: "Critical" },
+  high: { rank: 1, title: "High" },
+  medium: { rank: 2, title: "Medium" },
+  normal: { rank: 2, title: "Medium" },
+  low: { rank: 3, title: "Low" },
+};
+
+const PRIORITY_P_LEVELS = ["Critical", "High", "Medium", "Low"] as const;
+
+/**
+ * Reads an issue's priority from its labels: `priority: high`,
+ * `priority/low`, `priority-critical`, `p0`..`p3`, or a bare `urgent`.
+ * The most urgent label wins when several are present.
+ */
+export function priorityOf(labels: readonly string[]): { rank: number; title: string } | null {
+  let best: { rank: number; title: string } | null = null;
+  for (const label of labels) {
+    const lower = label.toLowerCase().trim();
+    const named = /^(?:priority\s*[:/-]?\s*)?([a-z]+)$/.exec(lower)?.[1];
+    const level = /^p([0-3])$/.exec(lower)?.[1];
+    const found =
+      level !== undefined
+        ? { rank: Number(level), title: PRIORITY_P_LEVELS[Number(level)] }
+        : named !== undefined &&
+            (lower.startsWith("priority") || named === "urgent" || named === "blocker")
+          ? PRIORITY_NAMES[named]
+          : undefined;
+    if (found && (!best || found.rank < best.rank)) {
+      best = found;
+    }
+  }
+  return best;
+}
+
+function byDateDesc(a: string, b: string): number {
+  return Date.parse(b) - Date.parse(a);
+}
+
+/** Returns a sorted copy; `"default"` keeps the order the provider returned. */
+export function sortIssues<T extends IssueLike>(issues: readonly T[], sort: IssueSort): T[] {
+  const copy = [...issues];
+  switch (sort) {
+    case "default":
+      return copy;
+    case "updated":
+      return copy.sort((a, b) => byDateDesc(a.updatedAt, b.updatedAt) || b.number - a.number);
+    case "created":
+      return copy.sort((a, b) => byDateDesc(a.createdAt, b.createdAt) || b.number - a.number);
+    case "number-desc":
+      return copy.sort((a, b) => b.number - a.number);
+    case "number-asc":
+      return copy.sort((a, b) => a.number - b.number);
+    case "title":
+      return copy.sort(
+        (a, b) =>
+          a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) || a.number - b.number,
+      );
+    case "priority":
+      return copy.sort(
+        (a, b) =>
+          (priorityOf(a.labels)?.rank ?? NO_PRIORITY_RANK) -
+            (priorityOf(b.labels)?.rank ?? NO_PRIORITY_RANK) || a.number - b.number,
+      );
+  }
+}
+
+/** A titled run of issues in the grouped list. */
+export interface IssueGroupSection<T> {
+  readonly key: string;
+  readonly title: string;
+  readonly issues: T[];
+}
+
+/**
+ * Splits already-sorted issues into sections, keeping each section's
+ * internal order. Sections are ordered alphabetically (priority by rank,
+ * state open-first); the "none" section — no milestone, label, assignee
+ * or priority — always comes last. `milestoneTitles` maps milestone id to
+ * its title.
+ */
+export function groupIssues<T extends IssueLike>(
+  issues: readonly T[],
+  group: IssueGroup,
+  milestoneTitles: ReadonlyMap<string, string>,
+): IssueGroupSection<T>[] {
+  if (group === "none") {
+    return [{ key: "", title: "", issues: [...issues] }];
+  }
+  const NONE = "\uffff";
+  const sections = new Map<string, IssueGroupSection<T>>();
+  const sortKey = new Map<string, string>();
+  for (const issue of issues) {
+    let key: string;
+    let title: string;
+    let order: string;
+    switch (group) {
+      case "milestone":
+        key = issue.milestoneId ?? NONE;
+        title = issue.milestoneId
+          ? (milestoneTitles.get(issue.milestoneId) ?? "Unknown milestone")
+          : "No milestone";
+        order = issue.milestoneId ? title.toLowerCase() : NONE;
+        break;
+      case "label":
+        key = issue.labels[0] ?? NONE;
+        title = issue.labels[0] ?? "No label";
+        order = issue.labels[0]?.toLowerCase() ?? NONE;
+        break;
+      case "state":
+        key = issue.state;
+        title = issue.state === "open" ? "Open" : "Closed";
+        order = issue.state === "open" ? "0" : "1";
+        break;
+      case "assignee":
+        key = issue.assignees[0] ?? NONE;
+        title = issue.assignees[0] ?? "Unassigned";
+        order = issue.assignees[0]?.toLowerCase() ?? NONE;
+        break;
+      case "priority": {
+        const priority = priorityOf(issue.labels);
+        key = priority?.title ?? NONE;
+        title = priority?.title ?? "No priority";
+        order = priority ? String(priority.rank) : NONE;
+        break;
+      }
+    }
+    let section = sections.get(key);
+    if (!section) {
+      section = { key, title, issues: [] };
+      sections.set(key, section);
+      sortKey.set(key, order);
+    }
+    section.issues.push(issue);
+  }
+  return [...sections.values()].sort((a, b) =>
+    (sortKey.get(a.key) ?? NONE).localeCompare(sortKey.get(b.key) ?? NONE),
+  );
+}
+
+/** Reads sort and grouping from the opaque stored prefs, falling back to defaults. */
+export function readListPrefs(prefs: Readonly<Record<string, unknown>>): {
+  sort: IssueSort;
+  group: IssueGroup;
+} {
+  const sort = ISSUE_SORTS.find((entry) => entry.value === prefs.issueSort)?.value ?? "default";
+  const group = ISSUE_GROUPS.find((entry) => entry.value === prefs.issueGroup)?.value ?? "none";
+  return { sort, group };
 }

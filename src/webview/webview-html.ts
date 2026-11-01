@@ -54,6 +54,8 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
         <select id="issue-milestone-filter" title="Filter by milestone">
           <option value="">All milestones</option>
         </select>
+        <select id="issue-sort" title="Sort issues"></select>
+        <select id="issue-group" title="Group issues"></select>
         <select id="issue-saved-filters" title="Apply a saved filter">
           <option value="">Saved filters…</option>
         </select>

@@ -14,7 +14,14 @@ import {
   removeSavedFilter,
   sameFilter,
   upsertSavedFilter,
+  groupIssues,
+  ISSUE_GROUPS,
+  ISSUE_SORTS,
+  readListPrefs,
+  sortIssues,
   type IssueFilter,
+  type IssueGroup,
+  type IssueSort,
   type SavedFilter,
 } from "./issue-view-model.js";
 
@@ -139,6 +146,8 @@ let selectedMilestoneId: string | null = null;
 let issueFilter: IssueFilter = EMPTY_FILTER;
 let uiPrefs: Record<string, unknown> = {};
 let savedFilters: SavedFilter[] = [];
+let issueSort: IssueSort = "default";
+let issueGroup: IssueGroup = "none";
 let milestoneStateFilter: "all" | "open" | "closed" = "all";
 const LIST_PAGE_SIZE = 50;
 let issueListPageSize = LIST_PAGE_SIZE;
@@ -216,26 +225,46 @@ function renderLabelBadges(labels: readonly string[]): string {
 function renderIssueList(): void {
   const list = byId<HTMLDivElement>("issue-list");
   list.innerHTML = "";
-  const issues = filterIssues(currentIssues, issueFilter, currentUser?.username ?? null);
-  const visibleIssues = issues.slice(0, issueListPageSize);
-  for (const issue of visibleIssues) {
-    const item = document.createElement("div");
-    item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
-    const stateClass = issue.state === "closed" ? " state-closed" : "";
-    item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}`;
-    item.addEventListener("click", () => {
-      selectedIssueId = issue.id;
-      showNewIssueForm = false;
-      renderIssueList();
-      renderIssueDetail();
-    });
-    list.appendChild(item);
+  const filtered = filterIssues(currentIssues, issueFilter, currentUser?.username ?? null);
+  const sections = groupIssues(
+    sortIssues(filtered, issueSort),
+    issueGroup,
+    new Map(currentMilestones.map((milestone) => [milestone.id, milestone.title])),
+  );
+
+  // Paging counts issues across sections: stop once the page is full.
+  let remainingSlots = issueListPageSize;
+  for (const section of sections) {
+    if (remainingSlots <= 0) {
+      break;
+    }
+    const visible = section.issues.slice(0, remainingSlots);
+    remainingSlots -= visible.length;
+    if (section.title) {
+      const header = document.createElement("div");
+      header.className = "group-header";
+      header.textContent = `${section.title} (${section.issues.length})`;
+      list.appendChild(header);
+    }
+    for (const issue of visible) {
+      const item = document.createElement("div");
+      item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
+      const stateClass = issue.state === "closed" ? " state-closed" : "";
+      item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}`;
+      item.addEventListener("click", () => {
+        selectedIssueId = issue.id;
+        showNewIssueForm = false;
+        renderIssueList();
+        renderIssueDetail();
+      });
+      list.appendChild(item);
+    }
   }
-  if (issues.length > visibleIssues.length) {
+  if (filtered.length > issueListPageSize) {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
     loadMore.className = "load-more";
-    loadMore.textContent = `Load more (${issues.length - visibleIssues.length} remaining)`;
+    loadMore.textContent = `Load more (${filtered.length - issueListPageSize} remaining)`;
     loadMore.addEventListener("click", () => {
       issueListPageSize += LIST_PAGE_SIZE;
       renderIssueList();
@@ -651,6 +680,11 @@ function setIssueFilter(next: IssueFilter): void {
   renderIssueList();
 }
 
+function persistListPrefs(): void {
+  uiPrefs = { ...uiPrefs, issueSort, issueGroup };
+  post({ type: "saveUiPrefs", prefs: uiPrefs });
+}
+
 function persistSavedFilters(): void {
   uiPrefs = { ...uiPrefs, savedFilters };
   post({ type: "saveUiPrefs", prefs: uiPrefs });
@@ -673,6 +707,17 @@ function syncFilterControls(): void {
       )
       .join("");
   milestoneSelect.value = issueFilter.milestone ?? "";
+
+  const sortSelect = byId<HTMLSelectElement>("issue-sort");
+  sortSelect.innerHTML = ISSUE_SORTS.map(
+    (entry) => `<option value="${entry.value}">${escapeHtml(entry.label)}</option>`,
+  ).join("");
+  sortSelect.value = issueSort;
+  const groupSelect = byId<HTMLSelectElement>("issue-group");
+  groupSelect.innerHTML = ISSUE_GROUPS.map(
+    (entry) => `<option value="${entry.value}">${escapeHtml(entry.label)}</option>`,
+  ).join("");
+  groupSelect.value = issueGroup;
 
   const matching = [...PRESET_FILTERS, ...savedFilters].find((entry) =>
     sameFilter(entry.filter, issueFilter),
@@ -719,6 +764,16 @@ byId<HTMLSelectElement>("issue-state-filter").addEventListener("change", (event)
 });
 byId<HTMLSelectElement>("issue-milestone-filter").addEventListener("change", (event) => {
   setIssueFilter({ ...issueFilter, milestone: (event.target as HTMLSelectElement).value || null });
+});
+byId<HTMLSelectElement>("issue-sort").addEventListener("change", (event) => {
+  issueSort = (event.target as HTMLSelectElement).value as IssueSort;
+  persistListPrefs();
+  renderIssueList();
+});
+byId<HTMLSelectElement>("issue-group").addEventListener("change", (event) => {
+  issueGroup = (event.target as HTMLSelectElement).value as IssueGroup;
+  persistListPrefs();
+  renderIssueList();
 });
 byId<HTMLSelectElement>("issue-saved-filters").addEventListener("change", (event) => {
   const name = (event.target as HTMLSelectElement).value;
@@ -836,7 +891,9 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
   } else if (message.type === "uiPrefs") {
     uiPrefs = { ...message.prefs };
     savedFilters = readSavedFilters(uiPrefs);
+    ({ sort: issueSort, group: issueGroup } = readListPrefs(uiPrefs));
     syncFilterControls();
+    renderIssueList();
   } else if (message.type === "openNewIssueForm") {
     selectedIssueId = null;
     showNewIssueForm = true;

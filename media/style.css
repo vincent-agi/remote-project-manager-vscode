@@ -341,3 +341,14 @@ body {
 .saved-filter-form input[type="text"] {
   flex: 1 1 auto;
 }
+
+.group-header {
+  position: sticky;
+  top: 0;
+  padding: 4px 8px;
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--vscode-descriptionForeground);
+  background-color: var(--vscode-sideBarSectionHeader-background, var(--vscode-editor-background));
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
