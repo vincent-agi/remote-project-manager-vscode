@@ -36,3 +36,42 @@ jobs:
       - run: npm ci
 
       - run: npm run compile
+
+  publish:
+    needs: [release-please, verify-build]
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+      # Publishing steps run only when the matching token is configured.
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Package the extension
+        run: npx vsce package
+
+      - name: Attach the package to the GitHub release
+        run: gh release upload "$TAG" ./*.vsix --clobber
+
+      - name: Publish to the VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        run: npx vsce publish --packagePath ./*.vsix
+
+      - name: Publish to Open VSX
+        if: ${{ env.OVSX_PAT != '' }}
+        run: npx ovsx publish ./*.vsix --pat "$OVSX_PAT"
+
+      - name: Explain why nothing was published
+        if: ${{ env.VSCE_PAT == '' && env.OVSX_PAT == '' }}
+        run: echo "::notice::No VSCE_PAT or OVSX_PAT secret is set, so the package was only attached to the release."
