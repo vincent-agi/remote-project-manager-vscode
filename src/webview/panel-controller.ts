@@ -8,6 +8,7 @@ import type {
 } from "../core/providers/project-provider.interface";
 import { assertCanWrite, hasFetchTimestamps } from "../core/providers/project-provider.interface";
 import { isAuthError } from "../core/auth/is-auth-error";
+import type { SettingEntry } from "../core/settings/settings-schema";
 import type { InboundMessage, IssueTemplateView, OutboundMessage, UiPrefsView } from "./messages";
 
 /** Called when an issue update crosses a recognized lifecycle transition. */
@@ -29,6 +30,20 @@ export type CreateBranchRequestHandler = (issue: IIssue) => Promise<string | nul
 export interface UiPrefsStore {
   get(): UiPrefsView;
   set(prefs: UiPrefsView): void | PromiseLike<void>;
+}
+
+/**
+ * What the settings page needs from the host: the current settings, a way
+ * to change one (resolving to an error text, or `null` on success; a `null`
+ * value resets the setting), and the live branch-name preview.
+ */
+export interface SettingsBridge {
+  read(): SettingEntry[];
+  write(key: string, value: unknown): Promise<string | null>;
+  previewBranchName(
+    pattern: string,
+    sample: { title: string; number: number; labels: readonly string[] },
+  ): { example: string; warnings: string[] };
 }
 
 /**
@@ -68,11 +83,39 @@ export class PanelController {
     private readonly uiPrefsStore?: UiPrefsStore,
     private readonly onReconnectRequest?: () => void,
     private readonly loadIssueTemplates?: () => Promise<readonly IssueTemplateView[]>,
+    private readonly settings?: SettingsBridge,
   ) {}
 
   async handleMessage(message: InboundMessage): Promise<void> {
     try {
       switch (message.type) {
+        case "requestSettings":
+          if (this.settings) {
+            this.postMessage({ type: "settings", entries: this.settings.read() });
+          }
+          return;
+        case "updateSetting": {
+          if (!this.settings) {
+            return;
+          }
+          const failure = await this.settings.write(message.key, message.value);
+          if (failure) {
+            this.postMessage({ type: "error", message: failure });
+            return;
+          }
+          this.postMessage({ type: "actionSuccess", message: "Setting saved." });
+          this.postMessage({ type: "settings", entries: this.settings.read() });
+          return;
+        }
+        case "previewBranchName":
+          if (this.settings) {
+            this.postMessage({
+              type: "branchNamePreview",
+              pattern: message.pattern,
+              ...this.settings.previewBranchName(message.pattern, message.sample),
+            });
+          }
+          return;
         case "requestComments":
           this.postMessage({
             type: "comments",

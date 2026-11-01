@@ -45,6 +45,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
     <button id="tab-issues" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="view-issues">${t("Issues")}</button>
     <button id="tab-board" class="tab" type="button" role="tab" aria-selected="false" aria-controls="view-board">${t("Board")}</button>
     <button id="tab-milestones" class="tab" type="button" role="tab" aria-selected="false" aria-controls="view-milestones">${t("Milestones")}</button>
+    <button id="tab-settings" class="tab" type="button" role="tab" aria-selected="false" aria-controls="view-settings">${t("Settings")}</button>
     <button id="refresh-button" class="tab refresh" type="button" title="${t("Refetch from the remote, bypassing the cache")}">&#8635; ${t("Refresh")}</button>
   </div>
 
@@ -100,6 +101,10 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
   <div id="view-board" class="view board-view" role="tabpanel" aria-label="${t("Board")}" hidden>
     <p id="board-note" class="board-note"></p>
     <div id="board" class="board"></div>
+  </div>
+
+  <div id="view-settings" class="view settings-view" role="tabpanel" aria-label="${t("Settings")}" hidden>
+    <div id="settings" class="settings"></div>
   </div>
 
   <div id="view-milestones" class="view" role="tabpanel" aria-label="${t("Milestones")}" hidden>

@@ -44,6 +44,13 @@ import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { StateSync } from "./state-sync";
+import { describeBranchPatternWarning, previewBranchPattern } from "./core/settings/branch-pattern";
+import {
+  buildSettingEntries,
+  findSettingDescriptor,
+  validateSettingValue,
+} from "./core/settings/settings-schema";
+import type { SettingsBridge } from "./webview/panel-controller";
 import { openGitGraph } from "./git-graph-panel";
 import { parseIssueTemplate, type IssueTemplate } from "./core/templates/issue-template";
 import {
@@ -436,6 +443,59 @@ async function readIssueTemplates(folderPath: string | undefined): Promise<Issue
   return templates;
 }
 
+/** Backs the in-panel settings page with the real VS Code configuration. */
+function makeSettingsBridge(): SettingsBridge {
+  const section = (): vscode.WorkspaceConfiguration =>
+    vscode.workspace.getConfiguration("remoteProjectManager");
+  return {
+    read: () =>
+      buildSettingEntries((key) => {
+        const configuration = section();
+        return {
+          value: configuration.get(key),
+          defaultValue: configuration.inspect(key)?.defaultValue,
+        };
+      }, vscode.l10n.t),
+    write: async (key, value) => {
+      const descriptor = findSettingDescriptor(key);
+      if (!descriptor) {
+        return vscode.l10n.t("Unknown setting.");
+      }
+      // `null` resets the setting to its default.
+      let stored: unknown;
+      if (value !== null) {
+        const validation = validateSettingValue(descriptor, value, vscode.l10n.t);
+        if (!validation.ok) {
+          return validation.reason;
+        }
+        stored = validation.value;
+      }
+      const target =
+        descriptor.scope === "workspace" && (vscode.workspace.workspaceFolders?.length ?? 0) > 0
+          ? vscode.ConfigurationTarget.Workspace
+          : vscode.ConfigurationTarget.Global;
+      try {
+        await section().update(key, stored, target);
+        return null;
+      } catch (error) {
+        return vscode.l10n.t(
+          "Could not save the setting: {0}",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+    previewBranchName: (pattern, sample) => {
+      const preview = previewBranchPattern(pattern, sample);
+      return {
+        example: preview.example,
+        warnings: preview.warnings.map((warning) =>
+          describeBranchPatternWarning(warning, vscode.l10n.t),
+        ),
+      };
+    },
+  };
+}
+
 /** Builds a fully wired PanelController for a resolved provider/repository. */
 async function buildController(
   context: vscode.ExtensionContext,
@@ -553,6 +613,7 @@ async function buildController(
       });
     },
     () => readIssueTemplates(folderPath),
+    makeSettingsBridge(),
   );
 }
 

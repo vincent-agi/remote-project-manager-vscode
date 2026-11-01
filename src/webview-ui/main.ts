@@ -47,6 +47,25 @@ import {
   type SavedFilter,
 } from "./issue-view-model.js";
 
+type SettingKindView =
+  | { type: "boolean" }
+  | { type: "number"; min: number }
+  | { type: "string" }
+  | { type: "enum"; values: string[] };
+
+interface SettingEntryView {
+  key: string;
+  group: string;
+  groupLabel: string;
+  label: string;
+  hint: string;
+  kind: SettingKindView;
+  scope: "workspace" | "user";
+  value: unknown;
+  defaultValue: unknown;
+  isDefault: boolean;
+}
+
 interface CommentView {
   id: string;
   author: string;
@@ -133,6 +152,8 @@ type OutboundMessage =
   | { type: "uiPrefs"; prefs: Record<string, unknown> }
   | { type: "issueTemplates"; templates: IssueTemplateView[] }
   | { type: "comments"; issueId: string; comments: CommentView[] }
+  | { type: "settings"; entries: SettingEntryView[] }
+  | { type: "branchNamePreview"; pattern: string; example: string; warnings: string[] }
   | { type: "repositoryOptions"; options: RepositoryOptionView[] }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
@@ -168,6 +189,13 @@ type InboundMessage =
   | { type: "reconnect" }
   | { type: "requestIssueTemplates" }
   | { type: "requestComments"; issueId: string }
+  | { type: "requestSettings" }
+  | { type: "updateSetting"; key: string; value: unknown }
+  | {
+      type: "previewBranchName";
+      pattern: string;
+      sample: { title: string; number: number; labels: string[] };
+    }
   | { type: "addComment"; issueId: string; body: string };
 
 declare function acquireVsCodeApi(): {
@@ -1094,10 +1122,124 @@ function syncFilterControls(): void {
     !matching || !savedFilters.some((entry) => entry.name === matching.name);
 }
 
-type TabName = "issues" | "milestones" | "board";
+const SETTING_GROUP_ORDER = ["connection", "branches", "automation", "ai", "editor"];
+
+let settingEntries: SettingEntryView[] = [];
+let previewTimer: number | undefined;
+
+function previewSample(): { title: string; number: number; labels: string[] } {
+  const issue = currentIssues[0];
+  return issue
+    ? { title: issue.title, number: issue.number, labels: [...issue.labels] }
+    : { title: "Add dark mode", number: 42, labels: ["enhancement"] };
+}
+
+function requestBranchPreview(pattern: string): void {
+  window.clearTimeout(previewTimer);
+  previewTimer = window.setTimeout(() => {
+    post({ type: "previewBranchName", pattern, sample: previewSample() });
+  }, 200);
+}
+
+/** The value as text for an input; objects (never expected) render empty rather than "[object Object]". */
+function settingText(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function renderSettingControl(entry: SettingEntryView): string {
+  const id = `setting-${entry.key}`;
+  const labelledBy = `aria-describedby="${id}-hint"`;
+  switch (entry.kind.type) {
+    case "boolean":
+      return `<input id="${id}" type="checkbox" ${entry.value === true ? "checked" : ""} ${labelledBy} />`;
+    case "number":
+      return `<input id="${id}" type="number" min="${entry.kind.min}" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
+    case "enum":
+      return `<select id="${id}" ${labelledBy}>${entry.kind.values
+        .map(
+          (option) =>
+            `<option value="${escapeAttr(option)}" ${entry.value === option ? "selected" : ""}>${escapeHtml(option)}</option>`,
+        )
+        .join("")}</select>`;
+    case "string":
+      return `<input id="${id}" type="text" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
+  }
+}
+
+function renderSettings(): void {
+  const container = byId<HTMLDivElement>("settings");
+  const focusedId = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
+  const groups = SETTING_GROUP_ORDER.map((group) =>
+    settingEntries.filter((entry) => entry.group === group),
+  ).filter((entries) => entries.length > 0);
+
+  container.innerHTML = groups
+    .map(
+      (
+        entries,
+      ) => `<section class="settings-group" aria-labelledby="settings-heading-${entries[0].group}">
+        <h3 id="settings-heading-${entries[0].group}">${escapeHtml(entries[0].groupLabel)}</h3>
+        ${entries
+          .map(
+            (entry) => `<div class="setting-row">
+              <label for="setting-${entry.key}">${escapeHtml(entry.label)}</label>
+              <span class="setting-scope">${escapeHtml(entry.scope === "workspace" ? t("Saved in the workspace") : t("Saved in your user settings"))}</span>
+              ${renderSettingControl(entry)}
+              ${entry.isDefault ? "" : `<button type="button" class="tab setting-reset" data-key="${escapeAttr(entry.key)}">${escapeHtml(t("Reset to default"))}</button>`}
+              <p id="setting-${entry.key}-hint" class="read-only-note">${escapeHtml(entry.hint)}</p>
+              ${entry.key === "branchNamePattern" ? `<div id="branch-preview" class="branch-preview" aria-live="polite"></div>` : ""}
+            </div>`,
+          )
+          .join("")}
+      </section>`,
+    )
+    .join("");
+
+  for (const entry of settingEntries) {
+    const control = document.getElementById(`setting-${entry.key}`) as
+      HTMLInputElement | HTMLSelectElement | null;
+    control?.addEventListener("change", () => {
+      let value: unknown;
+      if (entry.kind.type === "boolean") {
+        value = (control as HTMLInputElement).checked;
+      } else if (entry.kind.type === "number") {
+        value = control.value.trim() === "" ? Number.NaN : Number(control.value);
+      } else {
+        value = control.value;
+      }
+      post({ type: "updateSetting", key: entry.key, value });
+    });
+    if (entry.key === "branchNamePattern" && control) {
+      control.addEventListener("input", () => requestBranchPreview(control.value));
+      requestBranchPreview(control.value);
+    }
+  }
+  container.querySelectorAll<HTMLButtonElement>(".setting-reset").forEach((button) => {
+    button.addEventListener("click", () =>
+      post({ type: "updateSetting", key: button.dataset.key ?? "", value: null }),
+    );
+  });
+  if (focusedId) {
+    document.getElementById(focusedId)?.focus();
+  }
+}
+
+function renderBranchPreview(message: { example: string; warnings: string[] }): void {
+  const box = document.getElementById("branch-preview");
+  if (!box) {
+    return;
+  }
+  box.innerHTML = `<p>${escapeHtml(t("Example for the first issue:"))} <code>${escapeHtml(message.example)}</code></p>${
+    message.warnings.length > 0
+      ? `<ul class="branch-warnings">${message.warnings.map((warning) => `<li>&#9888; ${escapeHtml(warning)}</li>`).join("")}</ul>`
+      : ""
+  }`;
+}
+
+type TabName = "issues" | "milestones" | "board" | "settings";
 
 function activeTab(): TabName {
-  for (const tab of ["milestones", "board"] as const) {
+  for (const tab of ["milestones", "board", "settings"] as const) {
     if (byId<HTMLButtonElement>(`tab-${tab}`).classList.contains("active")) {
       return tab;
     }
@@ -1106,13 +1248,16 @@ function activeTab(): TabName {
 }
 
 function setActiveTab(tab: TabName): void {
-  for (const name of ["issues", "milestones", "board"] as const) {
+  for (const name of ["issues", "milestones", "board", "settings"] as const) {
     byId<HTMLButtonElement>(`tab-${name}`).classList.toggle("active", tab === name);
     byId<HTMLButtonElement>(`tab-${name}`).setAttribute("aria-selected", String(tab === name));
     byId<HTMLDivElement>(`view-${name}`).hidden = tab !== name;
   }
   if (tab === "board") {
     renderBoard();
+  }
+  if (tab === "settings") {
+    post({ type: "requestSettings" });
   }
 }
 
@@ -1316,6 +1461,7 @@ byId<HTMLButtonElement>("tab-milestones").addEventListener("click", () =>
   setActiveTab("milestones"),
 );
 byId<HTMLButtonElement>("tab-board").addEventListener("click", () => setActiveTab("board"));
+byId<HTMLButtonElement>("tab-settings").addEventListener("click", () => setActiveTab("settings"));
 byId<HTMLButtonElement>("issue-new").addEventListener("click", () => {
   selectedIssueId = null;
   showNewIssueForm = true;
@@ -1479,6 +1625,11 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     setIssueFilter({ ...issueFilter, milestone: null });
     setActiveTab("issues");
     renderIssueDetail();
+  } else if (message.type === "settings") {
+    settingEntries = message.entries;
+    renderSettings();
+  } else if (message.type === "branchNamePreview") {
+    renderBranchPreview(message);
   } else if (message.type === "comments") {
     commentRequestsInFlight.delete(message.issueId);
     commentsByIssue.set(message.issueId, message.comments);

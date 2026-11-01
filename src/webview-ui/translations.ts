@@ -130,6 +130,11 @@ export const FRENCH: Readonly<Record<string, string>> = {
   "Move to…": "Déplacer vers…",
   "Enter a name that is not one of the built-in filters.":
     "Saisissez un nom qui ne soit pas celui d'un filtre intégré.",
+  // Settings page
+  "Saved in the workspace": "Enregistré dans l'espace de travail",
+  "Saved in your user settings": "Enregistré dans vos paramètres utilisateur",
+  "Reset to default": "Rétablir la valeur par défaut",
+  "Example for the first issue:": "Exemple pour la première issue :",
   // Milestone due dates
   "No due date": "Aucune échéance",
   "Due today": "Échéance aujourd'hui",
@@ -146,4 +151,5 @@ export const FRENCH: Readonly<Record<string, string>> = {
   "Milestone updated.": "Jalon mis à jour.",
   "Comment added.": "Commentaire ajouté.",
   "Issue not found.": "Issue introuvable.",
+  "Setting saved.": "Paramètre enregistré.",
 };

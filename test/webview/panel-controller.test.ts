@@ -719,3 +719,83 @@ describe("PanelController label colours", () => {
     expect(posted.find((message) => message.type === "state")?.labelColors).toEqual({});
   });
 });
+
+describe("PanelController settings", () => {
+  const entries = [
+    {
+      key: "cacheTtlSeconds",
+      group: "connection" as const,
+      groupLabel: "Connection",
+      label: "Cache",
+      hint: "",
+      kind: { type: "number" as const, min: 0 },
+      scope: "user" as const,
+      value: 60,
+      defaultValue: 180,
+      isDefault: false,
+    },
+  ];
+
+  function makeBridge(writeResult: string | null = null) {
+    return {
+      read: vi.fn().mockReturnValue(entries),
+      write: vi.fn().mockResolvedValue(writeResult),
+      previewBranchName: vi.fn().mockReturnValue({ example: "fix/1-x", warnings: ["w"] }),
+    };
+  }
+
+  function makeController(bridge: ReturnType<typeof makeBridge> | undefined) {
+    const posted: { type: string }[] = [];
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      bridge,
+    );
+    return { controller, posted };
+  }
+
+  it("sends the settings on request", async () => {
+    const { controller, posted } = makeController(makeBridge());
+    await controller.handleMessage({ type: "requestSettings" });
+    expect(posted).toEqual([{ type: "settings", entries }]);
+  });
+
+  it("writes a setting, confirms and re-sends the settings", async () => {
+    const bridge = makeBridge();
+    const { controller, posted } = makeController(bridge);
+    await controller.handleMessage({ type: "updateSetting", key: "cacheTtlSeconds", value: 30 });
+    expect(bridge.write).toHaveBeenCalledWith("cacheTtlSeconds", 30);
+    expect(posted.map((message) => message.type)).toEqual(["actionSuccess", "settings"]);
+  });
+
+  it("reports a rejected write without confirming", async () => {
+    const { controller, posted } = makeController(makeBridge("Expected a number."));
+    await controller.handleMessage({ type: "updateSetting", key: "cacheTtlSeconds", value: "x" });
+    expect(posted).toEqual([{ type: "error", message: "Expected a number." }]);
+  });
+
+  it("answers a branch-name preview request", async () => {
+    const bridge = makeBridge();
+    const { controller, posted } = makeController(bridge);
+    const sample = { title: "T", number: 1, labels: [] };
+    await controller.handleMessage({ type: "previewBranchName", pattern: "${type}", sample });
+    expect(bridge.previewBranchName).toHaveBeenCalledWith("${type}", sample);
+    expect(posted).toEqual([
+      { type: "branchNamePreview", pattern: "${type}", example: "fix/1-x", warnings: ["w"] },
+    ]);
+  });
+
+  it("ignores settings messages when no bridge is wired", async () => {
+    const { controller, posted } = makeController(undefined);
+    await controller.handleMessage({ type: "requestSettings" });
+    await controller.handleMessage({ type: "updateSetting", key: "x", value: 1 });
+    expect(posted).toEqual([]);
+  });
+});
