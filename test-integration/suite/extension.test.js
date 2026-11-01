@@ -109,6 +109,8 @@ describe("Remote Project Manager — integration", () => {
       "remoteProjectManager.showGitGraph",
       "remoteProjectManager.lintCommitHistory",
       "remoteProjectManager.exportMilestoneContext",
+      "remoteProjectManager.createBranchForIssue",
+      "remoteProjectManager.openIssueInBrowser",
     ];
     for (const command of expected) {
       assert.ok(commands.includes(command), `command not registered: ${command}`);
