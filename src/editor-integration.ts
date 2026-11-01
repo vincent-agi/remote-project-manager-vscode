@@ -72,16 +72,19 @@ class TodoCodeLensProvider implements vscode.CodeLensProvider {
       const range = new vscode.Range(marker.line, 0, marker.line, 0);
       if (marker.issueNumber === null) {
         return new vscode.CodeLens(range, {
-          title: "$(add) Create issue from TODO",
+          title: vscode.l10n.t("$(add) Create issue from TODO"),
           command: "remoteProjectManager.createIssueFromTodo",
           arguments: [document.uri, marker.line],
         });
       }
       const issue = issues.find((candidate) => candidate.number === marker.issueNumber);
       return new vscode.CodeLens(range, {
-        title: `$(issues) #${marker.issueNumber}${issue ? ` ${issue.title}` : ""}${
-          issue?.state === "closed" ? " (closed)" : ""
-        }`,
+        title: vscode.l10n.t(
+          "$(issues) #{0}{1}{2}",
+          marker.issueNumber,
+          issue ? ` ${issue.title}` : "",
+          issue?.state === "closed" ? vscode.l10n.t(" (closed)") : "",
+        ),
         command: "remoteProjectManager.openIssueByNumber",
         arguments: [marker.issueNumber],
       });
@@ -107,7 +110,7 @@ class TodoLinkProvider implements vscode.DocumentLinkProvider {
         new vscode.Range(marker.line, marker.referenceStart, marker.line, marker.referenceEnd),
         openIssueByNumberCommandUri(marker.issueNumber),
       );
-      link.tooltip = `Open issue #${marker.issueNumber}`;
+      link.tooltip = vscode.l10n.t("Open issue #{0}", marker.issueNumber);
       return [link];
     });
   }
@@ -123,7 +126,9 @@ async function openIssueByNumber(deps: EditorIntegrationDeps, issueNumber: numbe
       return;
     }
     if (issues) {
-      void vscode.window.showWarningMessage(`Issue #${issueNumber} was not found on the remote.`);
+      void vscode.window.showWarningMessage(
+        vscode.l10n.t("Issue #{0} was not found on the remote.", issueNumber),
+      );
       return;
     }
   } catch (error) {
@@ -188,7 +193,9 @@ async function createIssueFromCode(
   const connection = await deps.getActiveConnection();
   if (!connection) {
     void vscode.window.showErrorMessage(
-      "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      vscode.l10n.t(
+        "No connected repository. Open the Remote Project Manager panel first, or set 'remoteProjectManager.repository'.",
+      ),
     );
     return undefined;
   }
@@ -196,7 +203,9 @@ async function createIssueFromCode(
     const capabilities = await connection.provider.getCapabilities();
     if (!capabilities.canWriteIssues) {
       void vscode.window.showErrorMessage(
-        "Your account cannot create issues on this repository (canWriteIssues is false).",
+        vscode.l10n.t(
+          "Your account cannot create issues on this repository (canWriteIssues is false).",
+        ),
       );
       return undefined;
     }
@@ -212,17 +221,24 @@ async function createIssueFromCode(
     });
     const issue = await connection.provider.createIssue({ title: draft.title, body: draft.body });
     deps.refreshTree();
+    const openLabel = vscode.l10n.t("Open");
     void vscode.window
-      .showInformationMessage(`Created issue #${issue.number}: ${issue.title}`, "Open")
+      .showInformationMessage(
+        vscode.l10n.t("Created issue #{0}: {1}", issue.number, issue.title),
+        openLabel,
+      )
       .then((choice) => {
-        if (choice === "Open") {
+        if (choice === openLabel) {
           void vscode.commands.executeCommand("remoteProjectManager.openIssueFromTree", issue.id);
         }
       });
     return issue;
   } catch (error) {
     void vscode.window.showErrorMessage(
-      `Could not create the issue: ${error instanceof Error ? error.message : String(error)}`,
+      vscode.l10n.t(
+        "Could not create the issue: {0}",
+        error instanceof Error ? error.message : String(error),
+      ),
     );
     return undefined;
   }
@@ -239,9 +255,9 @@ async function createIssueFromTodo(
     return;
   }
   const title = await vscode.window.showInputBox({
-    title: "Issue title",
+    title: vscode.l10n.t("Issue title"),
     value: marker.text || `${marker.keyword} in ${path.basename(uri.fsPath)}`,
-    validateInput: (value) => (value.trim() ? undefined : "Title is required."),
+    validateInput: (value) => (value.trim() ? undefined : vscode.l10n.t("Title is required.")),
   });
   if (title === undefined) {
     return;
@@ -270,7 +286,7 @@ async function createIssueFromTodo(
 async function createIssueFromSelection(deps: EditorIntegrationDeps): Promise<void> {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.selection.isEmpty) {
-    void vscode.window.showInformationMessage("Select some code first.");
+    void vscode.window.showInformationMessage(vscode.l10n.t("Select some code first."));
     return;
   }
   const { selection, document } = editor;
@@ -281,9 +297,9 @@ async function createIssueFromSelection(deps: EditorIntegrationDeps): Promise<vo
       : selection.end.line;
   const firstLineText = document.getText(selection).split("\n")[0]?.trim() ?? "";
   const title = await vscode.window.showInputBox({
-    title: "Issue title",
+    title: vscode.l10n.t("Issue title"),
     value: firstLineText.slice(0, 80),
-    validateInput: (value) => (value.trim() ? undefined : "Title is required."),
+    validateInput: (value) => (value.trim() ? undefined : vscode.l10n.t("Title is required.")),
   });
   if (title === undefined) {
     return;

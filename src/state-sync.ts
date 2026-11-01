@@ -138,7 +138,7 @@ export class StateSync implements vscode.Disposable {
     await provider.updateIssue(issue.id, { labels: labelsWithInProgress(issue) });
     logger.info(`State sync: #${issue.number} marked in-progress`);
     void vscode.window.showInformationMessage(
-      `Issue #${issue.number} marked "in-progress" after your first commit.`,
+      vscode.l10n.t('Issue #{0} marked "in-progress" after your first commit.', issue.number),
     );
     this.refreshTree();
   }
@@ -149,14 +149,16 @@ export class StateSync implements vscode.Disposable {
       return;
     }
     this.reminded.add(branch);
+    const newIssueLabel = vscode.l10n.t("New Issue");
+    const dismissLabel = vscode.l10n.t("Don't remind for this branch");
     const choice = await vscode.window.showInformationMessage(
-      `Branch '${branch}' is not linked to an issue.`,
-      "New Issue",
-      "Don't remind for this branch",
+      vscode.l10n.t("Branch '{0}' is not linked to an issue.", branch),
+      newIssueLabel,
+      dismissLabel,
     );
-    if (choice === "New Issue") {
+    if (choice === newIssueLabel) {
       await vscode.commands.executeCommand("remoteProjectManager.newIssue");
-    } else if (choice === "Don't remind for this branch") {
+    } else if (choice === dismissLabel) {
       await this.context.workspaceState.update(DISMISSED_REMINDERS_KEY, [...dismissed, branch]);
     }
   }
@@ -182,11 +184,16 @@ export class StateSync implements vscode.Disposable {
       ).filter((issue) => !this.proposedClosures.has(issue.number));
       for (const issue of closable) {
         this.proposedClosures.add(issue.number);
+        const closeLabel = vscode.l10n.t("Close issue");
         const choice = await vscode.window.showInformationMessage(
-          `Issue #${issue.number} is still open but was closed by a commit on '${defaultBranch}'. Close it?`,
-          "Close issue",
+          vscode.l10n.t(
+            "Issue #{0} is still open but was closed by a commit on '{1}'. Close it?",
+            issue.number,
+            defaultBranch,
+          ),
+          closeLabel,
         );
-        if (choice === "Close issue") {
+        if (choice === closeLabel) {
           await connection.provider.updateIssue(issue.id, { state: "closed" });
           logger.info(`State sync: #${issue.number} closed`);
           this.refreshTree();

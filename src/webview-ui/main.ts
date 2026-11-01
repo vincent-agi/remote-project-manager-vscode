@@ -5,12 +5,20 @@
 // because the host and webview programs have separate `rootDir`s.
 
 import { hasStateChanged } from "./state-diff.js";
-import { BOARD_COLUMNS, buildBoard, planBoardMove, type BoardColumnId } from "./board-model.js";
+import { setLanguage, t } from "./i18n.js";
+import {
+  BOARD_COLUMNS,
+  buildBoard,
+  describeColumn,
+  planBoardMove,
+  type BoardColumnId,
+} from "./board-model.js";
 import { describeCacheAge } from "./cache-age.js";
+import { readableBadgeColors } from "./contrast.js";
 import { markSeen, readSeenComments, unseenComments, type SeenComments } from "./comment-state.js";
 import { renderMarkdown } from "./markdown.js";
 import { enhanceMarkdownEditor } from "./markdown-editor.js";
-import { moveSelection, shortcutFor, SHORTCUT_HELP } from "./keyboard-shortcuts.js";
+import { moveSelection, shortcutFor, shortcutHelp } from "./keyboard-shortcuts.js";
 import {
   computeMilestoneProgress,
   describeDue,
@@ -25,6 +33,9 @@ import {
   removeSavedFilter,
   sameFilter,
   upsertSavedFilter,
+  describeGroup,
+  describePreset,
+  describeSort,
   groupIssues,
   ISSUE_GROUPS,
   ISSUE_SORTS,
@@ -35,6 +46,25 @@ import {
   type IssueSort,
   type SavedFilter,
 } from "./issue-view-model.js";
+
+type SettingKindView =
+  | { type: "boolean" }
+  | { type: "number"; min: number }
+  | { type: "string" }
+  | { type: "enum"; values: string[] };
+
+interface SettingEntryView {
+  key: string;
+  group: string;
+  groupLabel: string;
+  label: string;
+  hint: string;
+  kind: SettingKindView;
+  scope: "workspace" | "user";
+  value: unknown;
+  defaultValue: unknown;
+  isDefault: boolean;
+}
 
 interface CommentView {
   id: string;
@@ -104,6 +134,7 @@ interface StateSnapshot {
   currentUser: AuthenticatedUser;
   availableLabels: string[];
   availableAssignableUsers: string[];
+  labelColors: Record<string, string>;
 }
 
 type OutboundMessage =
@@ -115,11 +146,14 @@ type OutboundMessage =
       currentUser: AuthenticatedUser;
       availableLabels: string[];
       availableAssignableUsers: string[];
+      labelColors: Record<string, string>;
       dataFetchedAt?: number;
     }
   | { type: "uiPrefs"; prefs: Record<string, unknown> }
   | { type: "issueTemplates"; templates: IssueTemplateView[] }
   | { type: "comments"; issueId: string; comments: CommentView[] }
+  | { type: "settings"; entries: SettingEntryView[] }
+  | { type: "branchNamePreview"; pattern: string; example: string; warnings: string[] }
   | { type: "repositoryOptions"; options: RepositoryOptionView[] }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
@@ -155,6 +189,13 @@ type InboundMessage =
   | { type: "reconnect" }
   | { type: "requestIssueTemplates" }
   | { type: "requestComments"; issueId: string }
+  | { type: "requestSettings" }
+  | { type: "updateSetting"; key: string; value: unknown }
+  | {
+      type: "previewBranchName";
+      pattern: string;
+      sample: { title: string; number: number; labels: string[] };
+    }
   | { type: "addComment"; issueId: string; body: string };
 
 declare function acquireVsCodeApi(): {
@@ -162,6 +203,7 @@ declare function acquireVsCodeApi(): {
 };
 
 const vscodeApi = acquireVsCodeApi();
+setLanguage(document.documentElement.lang);
 
 let currentIssues: IssueView[] = [];
 let currentMilestones: MilestoneView[] = [];
@@ -174,6 +216,7 @@ let currentCapabilities: Capabilities = {
 let currentUser: AuthenticatedUser | null = null;
 let currentAvailableLabels: string[] = [];
 let currentAvailableAssignableUsers: string[] = [];
+let currentLabelColors: Record<string, string> = {};
 let selectedIssueId: string | null = null;
 let selectedMilestoneId: string | null = null;
 let issueFilter: IssueFilter = EMPTY_FILTER;
@@ -214,14 +257,14 @@ let errorTimer: number | undefined;
 
 function showError(message: string, authError = false): void {
   const banner = byId<HTMLDivElement>("error-banner");
-  banner.textContent = message;
+  banner.textContent = t(message);
   window.clearTimeout(errorTimer);
   if (authError) {
     // An expired token will not fix itself: keep the banner and offer the fix.
     const reconnect = document.createElement("button");
     reconnect.type = "button";
     reconnect.className = "tab";
-    reconnect.textContent = "Reconnect";
+    reconnect.textContent = t("Reconnect");
     reconnect.addEventListener("click", () => post({ type: "reconnect" }));
     banner.append(" ", reconnect);
   } else {
@@ -249,7 +292,7 @@ let lastFetchedAt: number | undefined;
 
 /** Shows how stale the data is once it is over a minute old. */
 function updateCacheBanner(): void {
-  const text = describeCacheAge(lastFetchedAt, Date.now());
+  const text = describeCacheAge(lastFetchedAt, Date.now(), t);
   const banner = byId<HTMLDivElement>("cache-banner");
   banner.hidden = text === null;
   byId<HTMLSpanElement>("cache-banner-text").textContent = text ?? "";
@@ -258,7 +301,7 @@ function updateCacheBanner(): void {
 function setRefreshing(refreshing: boolean): void {
   const button = byId<HTMLButtonElement>("refresh-button");
   button.disabled = refreshing;
-  button.textContent = refreshing ? "\u21BB Refreshing…" : "\u21BB Refresh";
+  button.textContent = refreshing ? `\u21BB ${t("Refreshing…")}` : `\u21BB ${t("Refresh")}`;
   document.body.setAttribute("aria-busy", String(refreshing));
 }
 
@@ -266,7 +309,7 @@ let toastTimer: number | undefined;
 
 function showToast(message: string): void {
   const toast = byId<HTMLDivElement>("toast");
-  toast.textContent = message;
+  toast.textContent = t(message);
   toast.className = "toast toast-success";
   toast.hidden = false;
   window.clearTimeout(toastTimer);
@@ -290,12 +333,39 @@ function findMilestone(milestoneId: string | null): MilestoneView | undefined {
   return currentMilestones.find((candidate) => candidate.id === milestoneId);
 }
 
+/**
+ * Colours label badges with the label's real colour, adjusted to stay
+ * readable. Colours are set through the CSSOM because the webview CSP
+ * forbids inline `style` attributes. High-contrast themes keep their own
+ * badge colours, which are chosen for accessibility.
+ */
+function applyLabelColors(root: ParentNode): void {
+  const highContrast =
+    document.body.classList.contains("vscode-high-contrast") ||
+    document.body.classList.contains("vscode-high-contrast-light") ||
+    window.matchMedia("(forced-colors: active)").matches;
+  if (highContrast) {
+    return;
+  }
+  root.querySelectorAll<HTMLElement>(".badge[data-label]").forEach((badge) => {
+    const color = currentLabelColors[badge.dataset.label ?? ""];
+    const colors = color ? readableBadgeColors(color) : null;
+    if (colors) {
+      badge.style.backgroundColor = colors.background;
+      badge.style.color = colors.foreground;
+    }
+  });
+}
+
 function renderLabelBadges(labels: readonly string[]): string {
   if (labels.length === 0) {
     return "";
   }
   return `<span class="badges">${labels
-    .map((label) => `<span class="badge">${escapeHtml(label)}</span>`)
+    .map(
+      (label) =>
+        `<span class="badge" data-label="${escapeAttr(label)}">${escapeHtml(label)}</span>`,
+    )
     .join("")}</span>`;
 }
 
@@ -328,6 +398,7 @@ function renderIssueList(): void {
     sortIssues(filtered, issueSort),
     issueGroup,
     new Map(currentMilestones.map((milestone) => [milestone.id, milestone.title])),
+    t,
   );
 
   visibleIssueIds = [];
@@ -335,9 +406,9 @@ function renderIssueList(): void {
     list.appendChild(
       renderEmptyState(
         currentIssues.length === 0
-          ? "No issues in this repository yet."
-          : "No issues match the current filters.",
-        currentIssues.length === 0 ? null : "Clear filters",
+          ? t("No issues in this repository yet.")
+          : t("No issues match the current filters."),
+        currentIssues.length === 0 ? null : t("Clear filters"),
         () => setIssueFilter(EMPTY_FILTER),
       ),
     );
@@ -362,6 +433,9 @@ function renderIssueList(): void {
       const item = document.createElement("div");
       item.className = "item" + (issue.id === selectedIssueId ? " selected" : "");
       item.dataset.issueId = issue.id;
+      item.setAttribute("role", "option");
+      item.setAttribute("aria-selected", String(issue.id === selectedIssueId));
+      item.tabIndex = 0;
       const stateClass = issue.state === "closed" ? " state-closed" : "";
       const unseen =
         issue.id === selectedIssueId
@@ -369,23 +443,34 @@ function renderIssueList(): void {
           : unseenComments(seenComments, issue.id, issue.commentsCount);
       const newComments =
         unseen > 0
-          ? `<span class="badge new-comments" title="${unseen} new comment${unseen === 1 ? "" : "s"}">+${unseen} &#128172;</span>`
+          ? `<span class="badge new-comments" title="${escapeAttr(unseen === 1 ? t("1 new comment") : t("{0} new comments", unseen))}">+${unseen} &#128172;</span>`
           : "";
       item.innerHTML = `<span class="number">#${issue.number}</span><span class="${stateClass}">${escapeHtml(issue.title)}</span>${renderLabelBadges(issue.labels)}${newComments}`;
-      item.addEventListener("click", () => {
+      const choose = (): void => {
         selectedIssueId = issue.id;
         showNewIssueForm = false;
         renderIssueList();
         renderIssueDetail();
+        document
+          .querySelector<HTMLElement>(`#issue-list .item[data-issue-id="${CSS.escape(issue.id)}"]`)
+          ?.focus();
+      };
+      item.addEventListener("click", choose);
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          choose();
+        }
       });
       list.appendChild(item);
     }
   }
+  applyLabelColors(list);
   if (filtered.length > issueListPageSize) {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
     loadMore.className = "load-more";
-    loadMore.textContent = `Load more (${filtered.length - issueListPageSize} remaining)`;
+    loadMore.textContent = t("Load more ({0} remaining)", filtered.length - issueListPageSize);
     loadMore.addEventListener("click", () => {
       issueListPageSize += LIST_PAGE_SIZE;
       renderIssueList();
@@ -415,13 +500,13 @@ function renderNewIssueForm(): void {
     )
     .join("");
   detail.innerHTML = `
-    <h3>New Issue</h3>
+    <h3>${t("New Issue")}</h3>
 
     ${
       issueTemplates.length > 0
-        ? `<label for="new-issue-template">Template</label>
+        ? `<label for="new-issue-template">${t("Template")}</label>
     <select id="new-issue-template">
-      <option value="">No template</option>
+      <option value="">${t("No template")}</option>
       ${issueTemplates
         .map((template, index) => `<option value="${index}">${escapeHtml(template.name)}</option>`)
         .join("")}
@@ -429,20 +514,20 @@ function renderNewIssueForm(): void {
         : ""
     }
 
-    <label for="new-issue-title">Title</label>
+    <label for="new-issue-title">${t("Title")}</label>
     <input id="new-issue-title" type="text" />
 
-    <label for="new-issue-body">Body</label>
+    <label for="new-issue-body">${t("Body")}</label>
     <textarea id="new-issue-body"></textarea>
 
-    <label for="new-issue-milestone">Milestone</label>
+    <label for="new-issue-milestone">${t("Milestone")}</label>
     <select id="new-issue-milestone">
       <option value="">—</option>
       ${milestoneOptions}
     </select>
 
-    <button id="new-issue-create" type="button">Create</button>
-    <button id="new-issue-cancel" type="button">Cancel</button>
+    <button id="new-issue-create" type="button">${t("Create")}</button>
+    <button id="new-issue-cancel" type="button">${t("Cancel")}</button>
   `;
 
   enhanceMarkdownEditor(byId<HTMLTextAreaElement>("new-issue-body"), markdownSources);
@@ -473,7 +558,7 @@ function renderNewIssueForm(): void {
   byId<HTMLButtonElement>("new-issue-create").addEventListener("click", () => {
     const title = byId<HTMLInputElement>("new-issue-title").value.trim();
     if (!title) {
-      showError("Title is required.");
+      showError(t("Title is required."));
       return;
     }
     const body = byId<HTMLTextAreaElement>("new-issue-body").value;
@@ -518,11 +603,11 @@ function renderComments(issueId: string): void {
   }
   const comments = commentsByIssue.get(issueId);
   if (!comments) {
-    container.textContent = "Loading comments…";
+    container.textContent = t("Loading comments…");
     return;
   }
   if (comments.length === 0) {
-    container.innerHTML = `<p class="read-only-note">No comments yet.</p>`;
+    container.innerHTML = `<p class="read-only-note">${t("No comments yet.")}</p>`;
     return;
   }
   container.innerHTML = comments
@@ -530,7 +615,7 @@ function renderComments(issueId: string): void {
       (comment) => `<article class="comment">
         <header><strong>${escapeHtml(comment.author)}</strong> <span class="comment-date">${formatDate(comment.createdAt)}</span>${
           comment.url
-            ? ` <a href="${escapeAttr(safeHref(comment.url))}" target="_blank" rel="noopener noreferrer">link</a>`
+            ? ` <a href="${escapeAttr(safeHref(comment.url))}" target="_blank" rel="noopener noreferrer">${t("link")}</a>`
             : ""
         }</header>
         <div class="md-preview">${renderMarkdown(comment.body)}</div>
@@ -547,7 +632,7 @@ function renderIssueDetail(): void {
   }
   const issue = currentIssues.find((candidate) => candidate.id === selectedIssueId);
   if (!issue) {
-    detail.innerHTML = `<p>Select an issue to view details.</p>`;
+    detail.innerHTML = `<p>${t("Select an issue to view details.")}</p>`;
     return;
   }
 
@@ -561,34 +646,34 @@ function renderIssueDetail(): void {
   ).sort();
   detail.innerHTML = `
     <div class="meta">
-      <div class="meta-row"><span class="meta-key">Number</span><span class="meta-value">#${issue.number}</span></div>
-      <div class="meta-row"><span class="meta-key">Link</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.url)}</a></span></div>
-      <div class="meta-row"><span class="meta-key">Branch</span><span class="meta-value"><button id="issue-create-branch" type="button" class="assign-to-me">Create branch</button></span></div>
-      <div class="meta-row"><span class="meta-key">Milestone</span><span class="meta-value">${milestone ? escapeHtml(milestone.title) : "—"}</span></div>
-      <div class="meta-row"><span class="meta-key">Labels</span><span class="meta-value">${issue.labels.length > 0 ? renderLabelBadges(issue.labels) : "—"}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Number")}</span><span class="meta-value">#${issue.number}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Link")}</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(issue.url)}</a></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Branch")}</span><span class="meta-value"><button id="issue-create-branch" type="button" class="assign-to-me">${t("Create branch")}</button></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Milestone")}</span><span class="meta-value">${milestone ? escapeHtml(milestone.title) : "—"}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Labels")}</span><span class="meta-value">${issue.labels.length > 0 ? renderLabelBadges(issue.labels) : "—"}</span></div>
       <div class="meta-row">
-        <span class="meta-key">Assignees</span>
+        <span class="meta-key">${t("Assignees")}</span>
         <span class="meta-value">
           ${issue.assignees.length > 0 ? issue.assignees.map(escapeHtml).join(", ") : "—"}
-          ${showAssignToMe ? '<button id="issue-assign-to-me" type="button" class="assign-to-me">Assign to me</button>' : ""}
+          ${showAssignToMe ? `<button id="issue-assign-to-me" type="button" class="assign-to-me">${t("Assign to me")}</button>` : ""}
         </span>
       </div>
-      <div class="meta-row"><span class="meta-key">Comments</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${issue.commentsCount}</a></span></div>
-      <div class="meta-row"><span class="meta-key">Created</span><span class="meta-value">${formatDate(issue.createdAt)}</span></div>
-      <div class="meta-row"><span class="meta-key">Updated</span><span class="meta-value">${formatDate(issue.updatedAt)}</span></div>
-      <div class="meta-row"><span class="meta-key">Closed</span><span class="meta-value">${formatDate(issue.closedAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Comments")}</span><span class="meta-value"><a href="${escapeAttr(safeHref(issue.url))}" target="_blank" rel="noopener noreferrer">${issue.commentsCount}</a></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Created")}</span><span class="meta-value">${formatDate(issue.createdAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Updated")}</span><span class="meta-value">${formatDate(issue.updatedAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Closed on")}</span><span class="meta-value">${formatDate(issue.closedAt)}</span></div>
     </div>
 
-    <label for="issue-title">Title</label>
+    <label for="issue-title">${t("Title")}</label>
     <input id="issue-title" type="text" value="${escapeAttr(issue.title)}" ${canWrite ? "" : "disabled"} />
 
-    <label for="issue-state">State</label>
+    <label for="issue-state">${t("State")}</label>
     <select id="issue-state" ${canWrite ? "" : "disabled"}>
-      <option value="open" ${issue.state === "open" ? "selected" : ""}>Open</option>
-      <option value="closed" ${issue.state === "closed" ? "selected" : ""}>Closed</option>
+      <option value="open" ${issue.state === "open" ? "selected" : ""}>${t("Open")}</option>
+      <option value="closed" ${issue.state === "closed" ? "selected" : ""}>${t("Closed")}</option>
     </select>
 
-    <label for="issue-milestone-editor">Milestone</label>
+    <label for="issue-milestone-editor">${t("Milestone")}</label>
     <select id="issue-milestone-editor" ${canWrite ? "" : "disabled"}>
       <option value="">—</option>
       ${currentMilestones
@@ -599,8 +684,8 @@ function renderIssueDetail(): void {
         .join("")}
     </select>
 
-    <label for="issue-labels-editor">Labels</label>
-    <div id="issue-labels-editor" class="checkbox-list">
+    <span id="issue-labels-heading" class="field-heading">${t("Labels")}</span>
+    <div id="issue-labels-editor" class="checkbox-list" role="group" aria-labelledby="issue-labels-heading">
       ${
         labelOptions.length > 0
           ? labelOptions
@@ -609,12 +694,12 @@ function renderIssueDetail(): void {
                   `<label><input type="checkbox" value="${escapeAttr(label)}" ${issue.labels.includes(label) ? "checked" : ""} ${canWrite ? "" : "disabled"} /> ${escapeHtml(label)}</label>`,
               )
               .join("")
-          : `<span class="read-only-note">No labels available on this repository.</span>`
+          : `<span class="read-only-note">${t("No labels available on this repository.")}</span>`
       }
     </div>
 
-    <label for="issue-assignees-editor">Assignees</label>
-    <div id="issue-assignees-editor" class="checkbox-list">
+    <span id="issue-assignees-heading" class="field-heading">${t("Assignees")}</span>
+    <div id="issue-assignees-editor" class="checkbox-list" role="group" aria-labelledby="issue-assignees-heading">
       ${
         assigneeOptions.length > 0
           ? assigneeOptions
@@ -623,34 +708,35 @@ function renderIssueDetail(): void {
                   `<label><input type="checkbox" value="${escapeAttr(username)}" ${issue.assignees.includes(username) ? "checked" : ""} ${canWrite ? "" : "disabled"} /> ${escapeHtml(username)}</label>`,
               )
               .join("")
-          : `<span class="read-only-note">No assignable users found for this repository.</span>`
+          : `<span class="read-only-note">${t("No assignable users found for this repository.")}</span>`
       }
     </div>
 
-    <label for="issue-body">Body</label>
+    <label for="issue-body">${t("Body")}</label>
     <textarea id="issue-body" ${canWrite ? "" : "disabled"}>${escapeHtml(issue.body)}</textarea>
 
-    <button id="issue-save" ${canWrite ? "" : "disabled"}>Save</button>
-    ${canWrite ? "" : '<p class="read-only-note">Your account does not have write access to issues.</p>'}
+    <button id="issue-save" ${canWrite ? "" : "disabled"}>${t("Save")}</button>
+    ${canWrite ? "" : `<p class="read-only-note">${t("Your account does not have write access to issues.")}</p>`}
 
-    <h3>Comments (${issue.commentsCount})</h3>
+    <h3>${t("Comments ({0})", issue.commentsCount)}</h3>
     <div id="issue-comments" aria-live="polite"></div>
     ${
       canWrite
-        ? `<label for="comment-body">Add a comment</label>
+        ? `<label for="comment-body">${t("Add a comment")}</label>
     <textarea id="comment-body"></textarea>
-    <button id="comment-add" type="button">Comment</button>`
+    <button id="comment-add" type="button">${t("Comment")}</button>`
         : ""
     }
   `;
 
+  applyLabelColors(detail);
   enhanceMarkdownEditor(byId<HTMLTextAreaElement>("issue-body"), markdownSources);
   if (canWrite) {
     enhanceMarkdownEditor(byId<HTMLTextAreaElement>("comment-body"), markdownSources);
     byId<HTMLButtonElement>("comment-add").addEventListener("click", () => {
       const body = byId<HTMLTextAreaElement>("comment-body").value;
       if (!body.trim()) {
-        showError("A comment cannot be empty.");
+        showError(t("A comment cannot be empty."));
         return;
       }
       commentSubmitIssueId = issue.id;
@@ -713,8 +799,13 @@ function milestoneProgress(milestone: MilestoneView): MilestoneProgress {
  * forbids inline `style` attributes, which a width-based bar would need.
  */
 function renderProgressBar(progress: MilestoneProgress): string {
-  const summary = `${progress.closed} of ${progress.total} issues closed (${progress.percent}%)`;
-  const due = describeDue(progress);
+  const summary = t(
+    "{0} of {1} issues closed ({2}%)",
+    progress.closed,
+    progress.total,
+    progress.percent,
+  );
+  const due = describeDue(progress, t);
   return `<div class="progress-block${progress.overdue ? " overdue" : ""}">
     <progress class="progress" max="100" value="${progress.percent}" aria-label="${escapeAttr(summary)}"></progress>
     <div class="progress-caption"><span>${escapeHtml(summary)}</span><span class="progress-due">${progress.overdue ? "&#9888; " : ""}${escapeHtml(due)}</span></div>
@@ -732,8 +823,8 @@ function renderMilestoneList(): void {
     list.appendChild(
       renderEmptyState(
         currentMilestones.length === 0
-          ? "No milestones in this repository yet."
-          : "No milestones match the current filter.",
+          ? t("No milestones in this repository yet.")
+          : t("No milestones match the current filter."),
         null,
         () => undefined,
       ),
@@ -744,9 +835,18 @@ function renderMilestoneList(): void {
   for (const milestone of visibleMilestones) {
     const item = document.createElement("div");
     item.className = "item" + (milestone.id === selectedMilestoneId ? " selected" : "");
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(milestone.id === selectedMilestoneId));
+    item.tabIndex = 0;
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        item.click();
+      }
+    });
     const stateClass = milestone.state === "closed" ? " state-closed" : "";
     const due = milestone.dueOn
-      ? `<span class="due">Due ${formatDate(milestone.dueOn)}</span>`
+      ? `<span class="due">${t("Due {0}", formatDate(milestone.dueOn))}</span>`
       : "";
     item.innerHTML = `<span class="${stateClass}">${escapeHtml(milestone.title)}</span>${due}${renderProgressBar(milestoneProgress(milestone))}`;
     item.addEventListener("click", () => {
@@ -761,7 +861,10 @@ function renderMilestoneList(): void {
     const loadMore = document.createElement("button");
     loadMore.type = "button";
     loadMore.className = "load-more";
-    loadMore.textContent = `Load more (${milestones.length - visibleMilestones.length} remaining)`;
+    loadMore.textContent = t(
+      "Load more ({0} remaining)",
+      milestones.length - visibleMilestones.length,
+    );
     loadMore.addEventListener("click", () => {
       milestoneListPageSize += LIST_PAGE_SIZE;
       renderMilestoneList();
@@ -773,19 +876,19 @@ function renderMilestoneList(): void {
 function renderNewMilestoneForm(): void {
   const detail = byId<HTMLDivElement>("milestone-detail");
   detail.innerHTML = `
-    <h3>New Milestone</h3>
+    <h3>${t("New Milestone")}</h3>
 
-    <label for="new-milestone-title">Title</label>
+    <label for="new-milestone-title">${t("Title")}</label>
     <input id="new-milestone-title" type="text" />
 
-    <label for="new-milestone-description">Description</label>
+    <label for="new-milestone-description">${t("Description")}</label>
     <textarea id="new-milestone-description"></textarea>
 
-    <label for="new-milestone-due">Due date</label>
+    <label for="new-milestone-due">${t("Due date")}</label>
     <input id="new-milestone-due" type="date" />
 
-    <button id="new-milestone-create" type="button">Create</button>
-    <button id="new-milestone-cancel" type="button">Cancel</button>
+    <button id="new-milestone-create" type="button">${t("Create")}</button>
+    <button id="new-milestone-cancel" type="button">${t("Cancel")}</button>
   `;
 
   byId<HTMLButtonElement>("new-milestone-cancel").addEventListener("click", () => {
@@ -796,7 +899,7 @@ function renderNewMilestoneForm(): void {
   byId<HTMLButtonElement>("new-milestone-create").addEventListener("click", () => {
     const title = byId<HTMLInputElement>("new-milestone-title").value.trim();
     if (!title) {
-      showError("Title is required.");
+      showError(t("Title is required."));
       return;
     }
     const description = byId<HTMLTextAreaElement>("new-milestone-description").value;
@@ -814,7 +917,7 @@ function renderMilestoneDetail(): void {
   }
   const milestone = currentMilestones.find((candidate) => candidate.id === selectedMilestoneId);
   if (!milestone) {
-    detail.innerHTML = `<p>Select a milestone to view details.</p>`;
+    detail.innerHTML = `<p>${t("Select a milestone to view details.")}</p>`;
     return;
   }
 
@@ -824,29 +927,29 @@ function renderMilestoneDetail(): void {
   const closedCount = linkedIssues.length - openCount;
   detail.innerHTML = `
     <div class="meta">
-      <div class="meta-row"><span class="meta-key">Number</span><span class="meta-value">#${milestone.number}</span></div>
-      <div class="meta-row"><span class="meta-key">Link</span><span class="meta-value"><a href="${escapeAttr(safeHref(milestone.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(milestone.url)}</a></span></div>
-      <div class="meta-row"><span class="meta-key">Due</span><span class="meta-value">${formatDate(milestone.dueOn)}</span></div>
-      <div class="meta-row"><span class="meta-key">Issues</span><span class="meta-value">${openCount} open, ${closedCount} closed <button id="milestone-view-issues" type="button" class="assign-to-me">View issues</button></span></div>
-      <div class="meta-row"><span class="meta-key">Created</span><span class="meta-value">${formatDate(milestone.createdAt)}</span></div>
-      <div class="meta-row"><span class="meta-key">Updated</span><span class="meta-value">${formatDate(milestone.updatedAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Number")}</span><span class="meta-value">#${milestone.number}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Link")}</span><span class="meta-value"><a href="${escapeAttr(safeHref(milestone.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(milestone.url)}</a></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Due")}</span><span class="meta-value">${formatDate(milestone.dueOn)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Issues")}</span><span class="meta-value">${t("{0} open, {1} closed", openCount, closedCount)} <button id="milestone-view-issues" type="button" class="assign-to-me">${t("View issues")}</button></span></div>
+      <div class="meta-row"><span class="meta-key">${t("Created")}</span><span class="meta-value">${formatDate(milestone.createdAt)}</span></div>
+      <div class="meta-row"><span class="meta-key">${t("Updated")}</span><span class="meta-value">${formatDate(milestone.updatedAt)}</span></div>
     </div>
 
     ${renderProgressBar(milestoneProgress(milestone))}
 
-    <label for="milestone-title">Title</label>
+    <label for="milestone-title">${t("Title")}</label>
     <input id="milestone-title" type="text" value="${escapeAttr(milestone.title)}" ${canWrite ? "" : "disabled"} />
 
-    <label for="milestone-state">State</label>
+    <label for="milestone-state">${t("State")}</label>
     <select id="milestone-state" ${canWrite ? "" : "disabled"}>
-      <option value="open" ${milestone.state === "open" ? "selected" : ""}>Open</option>
-      <option value="closed" ${milestone.state === "closed" ? "selected" : ""}>Closed</option>
+      <option value="open" ${milestone.state === "open" ? "selected" : ""}>${t("Open")}</option>
+      <option value="closed" ${milestone.state === "closed" ? "selected" : ""}>${t("Closed")}</option>
     </select>
 
-    <label for="milestone-description">Description</label>
+    <label for="milestone-description">${t("Description")}</label>
     <textarea id="milestone-description" ${canWrite ? "" : "disabled"}>${escapeHtml(milestone.description)}</textarea>
 
-    <label for="milestone-due-editor">Due date</label>
+    <label for="milestone-due-editor">${t("Due date")}</label>
     <input
       id="milestone-due-editor"
       type="date"
@@ -854,8 +957,8 @@ function renderMilestoneDetail(): void {
       ${canWrite ? "" : "disabled"}
     />
 
-    <button id="milestone-save" ${canWrite ? "" : "disabled"}>Save</button>
-    ${canWrite ? "" : '<p class="read-only-note">Your account does not have write access to milestones.</p>'}
+    <button id="milestone-save" ${canWrite ? "" : "disabled"}>${t("Save")}</button>
+    ${canWrite ? "" : `<p class="read-only-note">${t("Your account does not have write access to milestones.")}</p>`}
   `;
 
   byId<HTMLButtonElement>("milestone-view-issues").addEventListener("click", () => {
@@ -929,7 +1032,7 @@ function renderIssueLabelFilterOptions(): void {
   const select = byId<HTMLSelectElement>("issue-label-filter");
   const previousValue = select.value;
   select.innerHTML =
-    `<option value="">All labels</option>` +
+    `<option value="">${t("All labels")}</option>` +
     currentAvailableLabels
       .map((label) => `<option value="${escapeAttr(label)}">${escapeHtml(label)}</option>`)
       .join("");
@@ -944,7 +1047,7 @@ function renderIssueAssigneeFilterOptions(): void {
   const previousValue = select.value;
   const usernames = currentAvailableAssignableUsers;
   select.innerHTML =
-    `<option value="">All assignees</option><option value="@me">Assigned to me</option>` +
+    `<option value="">${t("All assignees")}</option><option value="@me">${t("Assigned to me")}</option>` +
     usernames
       .map((username) => `<option value="${escapeAttr(username)}">${escapeHtml(username)}</option>`)
       .join("");
@@ -982,7 +1085,7 @@ function syncFilterControls(): void {
 
   const milestoneSelect = byId<HTMLSelectElement>("issue-milestone-filter");
   milestoneSelect.innerHTML =
-    `<option value="">All milestones</option><option value="${NO_MILESTONE}">No milestone</option>` +
+    `<option value="">${t("All milestones")}</option><option value="${NO_MILESTONE}">${t("No milestone")}</option>` +
     currentMilestones
       .map(
         (milestone) =>
@@ -993,12 +1096,12 @@ function syncFilterControls(): void {
 
   const sortSelect = byId<HTMLSelectElement>("issue-sort");
   sortSelect.innerHTML = ISSUE_SORTS.map(
-    (entry) => `<option value="${entry.value}">${escapeHtml(entry.label)}</option>`,
+    (entry) => `<option value="${entry}">${escapeHtml(describeSort(entry, t))}</option>`,
   ).join("");
   sortSelect.value = issueSort;
   const groupSelect = byId<HTMLSelectElement>("issue-group");
   groupSelect.innerHTML = ISSUE_GROUPS.map(
-    (entry) => `<option value="${entry.value}">${escapeHtml(entry.label)}</option>`,
+    (entry) => `<option value="${entry}">${escapeHtml(describeGroup(entry, t))}</option>`,
   ).join("");
   groupSelect.value = issueGroup;
 
@@ -1007,22 +1110,136 @@ function syncFilterControls(): void {
   );
   const savedSelect = byId<HTMLSelectElement>("issue-saved-filters");
   const option = (entry: SavedFilter): string =>
-    `<option value="${escapeAttr(entry.name)}">${escapeHtml(entry.name)}</option>`;
+    `<option value="${escapeAttr(entry.name)}">${escapeHtml(describePreset(entry.name, t))}</option>`;
   savedSelect.innerHTML =
-    `<option value="">Saved filters…</option>` +
-    `<optgroup label="Built-in">${PRESET_FILTERS.map(option).join("")}</optgroup>` +
+    `<option value="">${t("Saved filters…")}</option>` +
+    `<optgroup label="${escapeAttr(t("Built-in"))}">${PRESET_FILTERS.map(option).join("")}</optgroup>` +
     (savedFilters.length > 0
-      ? `<optgroup label="Yours">${savedFilters.map(option).join("")}</optgroup>`
+      ? `<optgroup label="${escapeAttr(t("Yours"))}">${savedFilters.map(option).join("")}</optgroup>`
       : "");
   savedSelect.value = matching?.name ?? "";
   byId<HTMLButtonElement>("issue-filter-delete").hidden =
     !matching || !savedFilters.some((entry) => entry.name === matching.name);
 }
 
-type TabName = "issues" | "milestones" | "board";
+const SETTING_GROUP_ORDER = ["connection", "branches", "automation", "ai", "editor"];
+
+let settingEntries: SettingEntryView[] = [];
+let previewTimer: number | undefined;
+
+function previewSample(): { title: string; number: number; labels: string[] } {
+  const issue = currentIssues[0];
+  return issue
+    ? { title: issue.title, number: issue.number, labels: [...issue.labels] }
+    : { title: "Add dark mode", number: 42, labels: ["enhancement"] };
+}
+
+function requestBranchPreview(pattern: string): void {
+  window.clearTimeout(previewTimer);
+  previewTimer = window.setTimeout(() => {
+    post({ type: "previewBranchName", pattern, sample: previewSample() });
+  }, 200);
+}
+
+/** The value as text for an input; objects (never expected) render empty rather than "[object Object]". */
+function settingText(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function renderSettingControl(entry: SettingEntryView): string {
+  const id = `setting-${entry.key}`;
+  const labelledBy = `aria-describedby="${id}-hint"`;
+  switch (entry.kind.type) {
+    case "boolean":
+      return `<input id="${id}" type="checkbox" ${entry.value === true ? "checked" : ""} ${labelledBy} />`;
+    case "number":
+      return `<input id="${id}" type="number" min="${entry.kind.min}" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
+    case "enum":
+      return `<select id="${id}" ${labelledBy}>${entry.kind.values
+        .map(
+          (option) =>
+            `<option value="${escapeAttr(option)}" ${entry.value === option ? "selected" : ""}>${escapeHtml(option)}</option>`,
+        )
+        .join("")}</select>`;
+    case "string":
+      return `<input id="${id}" type="text" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
+  }
+}
+
+function renderSettings(): void {
+  const container = byId<HTMLDivElement>("settings");
+  const focusedId = document.activeElement instanceof HTMLElement ? document.activeElement.id : "";
+  const groups = SETTING_GROUP_ORDER.map((group) =>
+    settingEntries.filter((entry) => entry.group === group),
+  ).filter((entries) => entries.length > 0);
+
+  container.innerHTML = groups
+    .map(
+      (
+        entries,
+      ) => `<section class="settings-group" aria-labelledby="settings-heading-${entries[0].group}">
+        <h3 id="settings-heading-${entries[0].group}">${escapeHtml(entries[0].groupLabel)}</h3>
+        ${entries
+          .map(
+            (entry) => `<div class="setting-row">
+              <label for="setting-${entry.key}">${escapeHtml(entry.label)}</label>
+              <span class="setting-scope">${escapeHtml(entry.scope === "workspace" ? t("Saved in the workspace") : t("Saved in your user settings"))}</span>
+              ${renderSettingControl(entry)}
+              ${entry.isDefault ? "" : `<button type="button" class="tab setting-reset" data-key="${escapeAttr(entry.key)}">${escapeHtml(t("Reset to default"))}</button>`}
+              <p id="setting-${entry.key}-hint" class="read-only-note">${escapeHtml(entry.hint)}</p>
+              ${entry.key === "branchNamePattern" ? `<div id="branch-preview" class="branch-preview" aria-live="polite"></div>` : ""}
+            </div>`,
+          )
+          .join("")}
+      </section>`,
+    )
+    .join("");
+
+  for (const entry of settingEntries) {
+    const control = document.getElementById(`setting-${entry.key}`) as
+      HTMLInputElement | HTMLSelectElement | null;
+    control?.addEventListener("change", () => {
+      let value: unknown;
+      if (entry.kind.type === "boolean") {
+        value = (control as HTMLInputElement).checked;
+      } else if (entry.kind.type === "number") {
+        value = control.value.trim() === "" ? Number.NaN : Number(control.value);
+      } else {
+        value = control.value;
+      }
+      post({ type: "updateSetting", key: entry.key, value });
+    });
+    if (entry.key === "branchNamePattern" && control) {
+      control.addEventListener("input", () => requestBranchPreview(control.value));
+      requestBranchPreview(control.value);
+    }
+  }
+  container.querySelectorAll<HTMLButtonElement>(".setting-reset").forEach((button) => {
+    button.addEventListener("click", () =>
+      post({ type: "updateSetting", key: button.dataset.key ?? "", value: null }),
+    );
+  });
+  if (focusedId) {
+    document.getElementById(focusedId)?.focus();
+  }
+}
+
+function renderBranchPreview(message: { example: string; warnings: string[] }): void {
+  const box = document.getElementById("branch-preview");
+  if (!box) {
+    return;
+  }
+  box.innerHTML = `<p>${escapeHtml(t("Example for the first issue:"))} <code>${escapeHtml(message.example)}</code></p>${
+    message.warnings.length > 0
+      ? `<ul class="branch-warnings">${message.warnings.map((warning) => `<li>&#9888; ${escapeHtml(warning)}</li>`).join("")}</ul>`
+      : ""
+  }`;
+}
+
+type TabName = "issues" | "milestones" | "board" | "settings";
 
 function activeTab(): TabName {
-  for (const tab of ["milestones", "board"] as const) {
+  for (const tab of ["milestones", "board", "settings"] as const) {
     if (byId<HTMLButtonElement>(`tab-${tab}`).classList.contains("active")) {
       return tab;
     }
@@ -1031,12 +1248,16 @@ function activeTab(): TabName {
 }
 
 function setActiveTab(tab: TabName): void {
-  for (const name of ["issues", "milestones", "board"] as const) {
+  for (const name of ["issues", "milestones", "board", "settings"] as const) {
     byId<HTMLButtonElement>(`tab-${name}`).classList.toggle("active", tab === name);
+    byId<HTMLButtonElement>(`tab-${name}`).setAttribute("aria-selected", String(tab === name));
     byId<HTMLDivElement>(`view-${name}`).hidden = tab !== name;
   }
   if (tab === "board") {
     renderBoard();
+  }
+  if (tab === "settings") {
+    post({ type: "requestSettings" });
   }
 }
 
@@ -1053,7 +1274,7 @@ function moveIssueToColumn(issueId: string, column: BoardColumnId): void {
     return;
   }
   if (!currentCapabilities.canWriteIssues) {
-    showError("Your account does not have write access to issues.");
+    showError(t("Your account does not have write access to issues."));
     return;
   }
   const patch = planBoardMove(issue, column);
@@ -1071,13 +1292,15 @@ function renderBoard(): void {
     issueSort,
   );
   byId<HTMLParagraphElement>("board-note").textContent =
-    `${visible.length} issue${visible.length === 1 ? "" : "s"} shown. The filters of the Issues tab apply.` +
-    (canWrite ? " Drag a card, or use its Move menu, to change its status." : "");
+    (visible.length === 1
+      ? t("1 issue shown. The filters of the Issues tab apply.")
+      : t("{0} issues shown. The filters of the Issues tab apply.", visible.length)) +
+    (canWrite ? ` ${t("Drag a card, or use its Move menu, to change its status.")}` : "");
 
-  for (const column of buildBoard(visible)) {
+  for (const column of buildBoard(visible, t)) {
     const section = document.createElement("section");
     section.className = "board-column";
-    section.setAttribute("aria-label", `${column.title}, ${column.issues.length} issues`);
+    section.setAttribute("aria-label", t("{0}, {1} issues", column.title, column.issues.length));
     const header = document.createElement("h3");
     header.textContent = `${column.title} (${column.issues.length})`;
     section.appendChild(header);
@@ -1123,11 +1346,14 @@ function renderBoard(): void {
       const move = document.createElement("select");
       move.className = "board-card-move";
       move.disabled = !canWrite;
-      move.setAttribute("aria-label", `Move issue #${issue.number}`);
+      move.setAttribute("aria-label", t("Move issue #{0}", issue.number));
       move.innerHTML =
-        `<option value="">Move to…</option>` +
-        BOARD_COLUMNS.filter((target) => target.id !== column.id)
-          .map((target) => `<option value="${target.id}">${escapeHtml(target.title)}</option>`)
+        `<option value="">${t("Move to…")}</option>` +
+        BOARD_COLUMNS.filter((target) => target !== column.id)
+          .map(
+            (target) =>
+              `<option value="${target}">${escapeHtml(describeColumn(target, t))}</option>`,
+          )
           .join("");
       move.addEventListener("change", () => {
         if (move.value) {
@@ -1139,7 +1365,26 @@ function renderBoard(): void {
     }
     container.appendChild(section);
   }
+  applyLabelColors(container);
 }
+
+/**
+ * The state options' texts are set here rather than in the page shell: "Open"
+ * as a state ("Ouvert") and "Open" as a button ("Ouvrir") are different words
+ * in French, and the shell is translated by the host with one table.
+ */
+function localizeStateOptions(): void {
+  for (const id of ["issue-state-filter", "milestone-state-filter"]) {
+    for (const option of Array.from(byId<HTMLSelectElement>(id).options)) {
+      if (option.value === "open") {
+        option.textContent = t("Open");
+      } else if (option.value === "closed") {
+        option.textContent = t("Closed");
+      }
+    }
+  }
+}
+localizeStateOptions();
 
 byId<HTMLButtonElement>("tab-issues").addEventListener("click", () => {
   setIssueFilter(EMPTY_FILTER);
@@ -1192,7 +1437,7 @@ byId<HTMLButtonElement>("saved-filter-confirm").addEventListener("click", () => 
   const input = byId<HTMLInputElement>("saved-filter-name");
   const next = upsertSavedFilter(savedFilters, input.value, issueFilter);
   if (!next) {
-    showError("Enter a name that is not one of the built-in filters.");
+    showError(t("Enter a name that is not one of the built-in filters."));
     return;
   }
   savedFilters = next;
@@ -1216,6 +1461,7 @@ byId<HTMLButtonElement>("tab-milestones").addEventListener("click", () =>
   setActiveTab("milestones"),
 );
 byId<HTMLButtonElement>("tab-board").addEventListener("click", () => setActiveTab("board"));
+byId<HTMLButtonElement>("tab-settings").addEventListener("click", () => setActiveTab("settings"));
 byId<HTMLButtonElement>("issue-new").addEventListener("click", () => {
   selectedIssueId = null;
   showNewIssueForm = true;
@@ -1252,10 +1498,12 @@ function toggleShortcutHelp(force?: boolean): void {
   const help = byId<HTMLDivElement>("shortcut-help");
   help.hidden = force === undefined ? !help.hidden : !force;
   if (!help.hidden) {
-    help.innerHTML = `<h3>Keyboard shortcuts</h3><dl>${SHORTCUT_HELP.map(
-      (entry) =>
-        `<dt><kbd>${escapeHtml(entry.keys)}</kbd></dt><dd>${escapeHtml(entry.description)}</dd>`,
-    ).join("")}</dl><p>Press <kbd>Esc</kbd> to close.</p>`;
+    help.innerHTML = `<h3>${t("Keyboard shortcuts")}</h3><dl>${shortcutHelp(t)
+      .map(
+        (entry) =>
+          `<dt><kbd>${escapeHtml(entry.keys)}</kbd></dt><dd>${escapeHtml(entry.description)}</dd>`,
+      )
+      .join("")}</dl><p>${t("Press {0} to close.", "<kbd>Esc</kbd>")}</p>`;
   }
 }
 
@@ -1329,6 +1577,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
       currentUser: message.currentUser,
       availableLabels: message.availableLabels,
       availableAssignableUsers: message.availableAssignableUsers,
+      labelColors: message.labelColors,
     };
     if (!templatesRequested) {
       templatesRequested = true;
@@ -1349,6 +1598,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     currentUser = message.currentUser;
     currentAvailableLabels = message.availableLabels;
     currentAvailableAssignableUsers = message.availableAssignableUsers;
+    currentLabelColors = message.labelColors;
     renderIssueLabelFilterOptions();
     renderIssueAssigneeFilterOptions();
     syncFilterControls();
@@ -1375,6 +1625,11 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     setIssueFilter({ ...issueFilter, milestone: null });
     setActiveTab("issues");
     renderIssueDetail();
+  } else if (message.type === "settings") {
+    settingEntries = message.entries;
+    renderSettings();
+  } else if (message.type === "branchNamePreview") {
+    renderBranchPreview(message);
   } else if (message.type === "comments") {
     commentRequestsInFlight.delete(message.issueId);
     commentsByIssue.set(message.issueId, message.comments);

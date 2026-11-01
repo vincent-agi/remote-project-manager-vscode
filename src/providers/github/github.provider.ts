@@ -85,7 +85,7 @@ export interface GithubClient {
       per_page: number;
       page: number;
     }): Promise<{
-      data: readonly { name: string }[];
+      data: readonly { name: string; color?: string }[];
     }>;
     listAssignees(params: {
       owner: string;
@@ -328,6 +328,20 @@ export class GithubProvider implements IProjectProvider {
       }),
     );
     return labels.map((label) => label.name);
+  }
+
+  async listLabelColors(_options?: FetchOptions): Promise<Readonly<Record<string, string>>> {
+    const labels = await this.paginateAll((page) =>
+      this.client.issues.listLabelsForRepo({
+        owner: this.owner,
+        repo: this.repo,
+        per_page: 100,
+        page,
+      }),
+    );
+    return Object.fromEntries(
+      labels.flatMap((label) => (label.color ? [[label.name, label.color]] : [])),
+    );
   }
 
   async listAssignableUsers(_options?: FetchOptions): Promise<readonly string[]> {

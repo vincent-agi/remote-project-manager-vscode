@@ -450,3 +450,15 @@ describe("GithubProvider comments", () => {
     ).rejects.toThrow(/Not a valid GitHub issue id/);
   });
 });
+
+describe("GithubProvider.listLabelColors", () => {
+  it("maps label names to their colours, skipping labels without one", async () => {
+    const client = makeClient();
+    client.issues.listLabelsForRepo = vi.fn().mockResolvedValue({
+      data: [{ name: "bug", color: "d73a4a" }, { name: "plain" }],
+    });
+    expect(await new GithubProvider(client, "acme", "widgets").listLabelColors()).toEqual({
+      bug: "d73a4a",
+    });
+  });
+});

@@ -1,12 +1,20 @@
+import { identityTranslate, type Translate } from "./i18n.js";
 import type { IssueLike } from "./issue-view-model.js";
 
 export type BoardColumnId = "todo" | "in-progress" | "done";
 
-export const BOARD_COLUMNS: readonly { id: BoardColumnId; title: string }[] = [
-  { id: "todo", title: "To do" },
-  { id: "in-progress", title: "In progress" },
-  { id: "done", title: "Done" },
-];
+export const BOARD_COLUMNS: readonly BoardColumnId[] = ["todo", "in-progress", "done"];
+
+export function describeColumn(id: BoardColumnId, t: Translate = identityTranslate): string {
+  switch (id) {
+    case "todo":
+      return t("To do");
+    case "in-progress":
+      return t("In progress");
+    case "done":
+      return t("Done");
+  }
+}
 
 const IN_PROGRESS_LABEL = "in-progress";
 
@@ -32,10 +40,12 @@ export interface BoardColumn<T> {
 /** Distributes issues over the three columns, keeping their relative order. */
 export function buildBoard<T extends Pick<IssueLike, "state" | "labels">>(
   issues: readonly T[],
+  t: Translate = identityTranslate,
 ): BoardColumn<T>[] {
-  return BOARD_COLUMNS.map((column) => ({
-    ...column,
-    issues: issues.filter((issue) => columnOf(issue) === column.id),
+  return BOARD_COLUMNS.map((id) => ({
+    id,
+    title: describeColumn(id, t),
+    issues: issues.filter((issue) => columnOf(issue) === id),
   }));
 }
 

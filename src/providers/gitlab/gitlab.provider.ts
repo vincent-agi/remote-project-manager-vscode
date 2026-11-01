@@ -62,7 +62,7 @@ export interface GitlabClient {
     ): Promise<RawGitlabMilestone>;
   };
   ProjectLabels: {
-    all(projectId: string): Promise<readonly { name: string }[]>;
+    all(projectId: string): Promise<readonly { name: string; color?: string }[]>;
   };
   ProjectMembers: {
     all(
@@ -244,6 +244,13 @@ export class GitlabProvider implements IProjectProvider {
   async listLabels(_options?: FetchOptions): Promise<readonly string[]> {
     const labels = await this.client.ProjectLabels.all(this.projectPath);
     return labels.map((label) => label.name);
+  }
+
+  async listLabelColors(_options?: FetchOptions): Promise<Readonly<Record<string, string>>> {
+    const labels = await this.client.ProjectLabels.all(this.projectPath);
+    return Object.fromEntries(
+      labels.flatMap((label) => (label.color ? [[label.name, label.color.replace(/^#/, "")]] : [])),
+    );
   }
 
   async listAssignableUsers(_options?: FetchOptions): Promise<readonly string[]> {

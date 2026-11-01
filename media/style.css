@@ -714,3 +714,98 @@ kbd {
   stroke: var(--vscode-terminal-ansiMagenta);
   fill: var(--vscode-terminal-ansiMagenta);
 }
+
+:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 1px;
+}
+
+.item:focus-visible {
+  outline-offset: -1px;
+}
+
+.field-heading {
+  display: block;
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+@media (forced-colors: active) {
+  .badge {
+    border: 1px solid CanvasText;
+  }
+
+  .progress::-webkit-progress-value {
+    background-color: Highlight;
+  }
+
+  .graph-svg line,
+  .graph-svg .node {
+    stroke: CanvasText;
+  }
+}
+
+.settings-view {
+  display: block;
+  padding: 8px 12px;
+  overflow: auto;
+}
+
+.settings-group {
+  max-width: 640px;
+  margin-bottom: 16px;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.setting-row label {
+  font-weight: 600;
+}
+
+.setting-scope {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85em;
+}
+
+.setting-row input[type="text"],
+.setting-row input[type="number"],
+.setting-row select {
+  grid-column: 1;
+  box-sizing: border-box;
+  width: 100%;
+  color: var(--vscode-input-foreground);
+  background-color: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  padding: 4px 6px;
+  font-family: inherit;
+}
+
+.setting-row input[type="checkbox"] {
+  grid-column: 1;
+  justify-self: start;
+}
+
+.setting-row .setting-reset {
+  grid-column: 2;
+}
+
+.setting-row .read-only-note,
+.setting-row .branch-preview {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.branch-warnings {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--vscode-editorWarning-foreground);
+}

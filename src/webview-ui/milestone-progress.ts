@@ -1,3 +1,5 @@
+import { identityTranslate, type Translate } from "./i18n.js";
+
 /** The fields of a milestone the progress bar reads. */
 export interface MilestoneProgressInput {
   readonly state: "open" | "closed";
@@ -53,17 +55,20 @@ export function computeMilestoneProgress(
 }
 
 /** Human-readable due-date status, e.g. "Due in 3 days", "2 days overdue". */
-export function describeDue(progress: MilestoneProgress): string {
+export function describeDue(progress: MilestoneProgress, t: Translate = identityTranslate): string {
   const days = progress.daysRemaining;
   if (days === null) {
-    return "No due date";
+    return t("No due date");
   }
-  const plural = (count: number): string => `${count} day${count === 1 ? "" : "s"}`;
   if (days === 0) {
-    return "Due today";
+    return t("Due today");
   }
   if (days > 0) {
-    return `Due in ${plural(days)}`;
+    return days === 1 ? t("Due in 1 day") : t("Due in {0} days", days);
   }
-  return progress.overdue ? `${plural(-days)} overdue` : `Was due ${plural(-days)} ago`;
+  const late = -days;
+  if (progress.overdue) {
+    return late === 1 ? t("1 day overdue") : t("{0} days overdue", late);
+  }
+  return late === 1 ? t("Was due 1 day ago") : t("Was due {0} days ago", late);
 }

@@ -1,3 +1,4 @@
+import { identityTranslate, type Translate } from "../i18n/translate";
 import type { IIssue } from "../models/issue.model";
 
 /** The fields the sidebar tree needs for one assigned issue. */
@@ -135,19 +136,57 @@ export function escapeMarkdown(text: string): string {
   return text.replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, "\\$&");
 }
 
+/** Display name of a work status, as a lower-case phrase. */
+export function describeWorkStatus(status: WorkStatus, t: Translate = identityTranslate): string {
+  switch (status) {
+    case "in-progress":
+      return t("in progress");
+    case "blocked":
+      return t("blocked");
+    case "todo":
+      return t("to do");
+  }
+}
+
+/** Display name of a priority. */
+export function describePriority(
+  priority: IssuePriority,
+  t: Translate = identityTranslate,
+): string {
+  switch (priority.title) {
+    case "Critical":
+      return t("Critical");
+    case "High":
+      return t("High");
+    case "Medium":
+      return t("Medium");
+    case "Low":
+      return t("Low");
+  }
+}
+
 /** Markdown tooltip body for an assigned issue. `milestoneTitle` is `null` when it has none. */
-export function buildIssueTooltip(issue: MyIssueSummary, milestoneTitle: string | null): string {
+export function buildIssueTooltip(
+  issue: MyIssueSummary,
+  milestoneTitle: string | null,
+  t: Translate = identityTranslate,
+): string {
   const priority = priorityOf(issue.labels);
   const lines = [
     `**#${issue.number} ${escapeMarkdown(issue.title)}**`,
     "",
-    `Status: ${workStatusOf(issue.labels).replace("-", " ")}`,
-    ...(priority ? [`Priority: ${priority.title}`] : []),
-    ...(milestoneTitle ? [`Milestone: ${escapeMarkdown(milestoneTitle)}`] : []),
+    t("Status: {0}", describeWorkStatus(workStatusOf(issue.labels), t)),
+    ...(priority ? [t("Priority: {0}", describePriority(priority, t))] : []),
+    ...(milestoneTitle ? [t("Milestone: {0}", escapeMarkdown(milestoneTitle))] : []),
     ...(issue.labels.length > 0
-      ? [`Labels: ${issue.labels.map((label) => `\`${label.replace(/`/g, "'")}\``).join(", ")}`]
+      ? [
+          t(
+            "Labels: {0}",
+            issue.labels.map((label) => `\`${label.replace(/`/g, "'")}\``).join(", "),
+          ),
+        ]
       : []),
-    `Updated: ${issue.updatedAt.slice(0, 10)}`,
+    t("Updated: {0}", issue.updatedAt.slice(0, 10)),
   ];
   return lines.join("\n\n");
 }
@@ -156,9 +195,10 @@ export function buildIssueTooltip(issue: MyIssueSummary, milestoneTitle: string 
 export function buildIssueDescription(
   issue: MyIssueSummary,
   milestoneTitle: string | null,
+  t: Translate = identityTranslate,
 ): string {
   const priority = priorityOf(issue.labels);
-  return [milestoneTitle, priority?.title]
+  return [milestoneTitle, priority ? describePriority(priority, t) : undefined]
     .filter((part): part is string => Boolean(part))
     .join(" · ");
 }

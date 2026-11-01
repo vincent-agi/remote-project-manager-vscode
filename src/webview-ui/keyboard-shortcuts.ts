@@ -1,3 +1,5 @@
+import { identityTranslate, type Translate } from "./i18n.js";
+
 export type ShortcutAction = "next" | "previous" | "edit" | "search" | "refresh" | "help";
 
 /** The subset of a `KeyboardEvent` the shortcut map reads. */
@@ -9,14 +11,18 @@ export interface KeyLike {
 }
 
 /** Shortcuts shown by the `?` help, in display order. */
-export const SHORTCUT_HELP: readonly { keys: string; description: string }[] = [
-  { keys: "j", description: "Next issue" },
-  { keys: "k", description: "Previous issue" },
-  { keys: "e", description: "Edit the selected issue" },
-  { keys: "/", description: "Search issues" },
-  { keys: "r", description: "Refresh" },
-  { keys: "?", description: "Show this help" },
-];
+export function shortcutHelp(
+  t: Translate = identityTranslate,
+): { keys: string; description: string }[] {
+  return [
+    { keys: "j", description: t("Next issue") },
+    { keys: "k", description: t("Previous issue") },
+    { keys: "e", description: t("Edit the selected issue") },
+    { keys: "/", description: t("Search issues") },
+    { keys: "r", description: t("Refresh") },
+    { keys: "?", description: t("Show this help") },
+  ];
+}
 
 /**
  * Maps a key press to an action. Single-key shortcuts must never fire

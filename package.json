@@ -1,7 +1,7 @@
 {
   "name": "remote-project-manager",
-  "displayName": "Remote Project Manager",
-  "description": "View and manage GitHub and GitLab Issues and Milestones from a central panel in VS Code.",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.0.1",
   "publisher": "local-dev",
   "icon": "media/plugin-icon.png",
@@ -24,95 +24,99 @@
     "commands": [
       {
         "command": "remoteProjectManager.openPanel",
-        "title": "Remote Project Manager: Open Panel"
+        "title": "%command.openPanel.title%"
       },
       {
         "command": "remoteProjectManager.signOutGitLab",
-        "title": "Remote Project Manager: Sign Out of GitLab"
+        "title": "%command.signOutGitLab.title%"
       },
       {
         "command": "remoteProjectManager.newIssue",
-        "title": "Remote Project Manager: New Issue"
+        "title": "%command.newIssue.title%"
       },
       {
         "command": "remoteProjectManager.newMilestone",
-        "title": "Remote Project Manager: New Milestone"
+        "title": "%command.newMilestone.title%"
       },
       {
         "command": "remoteProjectManager.refresh",
-        "title": "Remote Project Manager: Refresh"
+        "title": "%command.refresh.title%"
       },
       {
         "command": "remoteProjectManager.composeCommit",
-        "title": "Remote Project Manager: Compose Commit (Conventional + Gitmoji)",
+        "title": "%command.composeCommit.title%",
         "icon": "$(sparkle)"
       },
       {
         "command": "remoteProjectManager.pickGitmoji",
-        "title": "Remote Project Manager: Pick Gitmoji"
+        "title": "%command.pickGitmoji.title%"
       },
       {
         "command": "remoteProjectManager.copyIssueContext",
-        "title": "Remote Project Manager: Copy Issue Context for AI",
+        "title": "%command.copyIssueContext.title%",
         "icon": "$(copy)"
       },
       {
         "command": "remoteProjectManager.createPrFromIssue",
-        "title": "Remote Project Manager: Create PR from Issue",
+        "title": "%command.createPrFromIssue.title%",
         "icon": "$(git-pull-request)"
       },
       {
         "command": "remoteProjectManager.showGitGraph",
-        "title": "Remote Project Manager: Show Git Graph (by Issue)"
+        "title": "%command.showGitGraph.title%"
       },
       {
         "command": "remoteProjectManager.lintCommitHistory",
-        "title": "Remote Project Manager: Lint Commit History"
+        "title": "%command.lintCommitHistory.title%"
       },
       {
         "command": "remoteProjectManager.exportMilestoneContext",
-        "title": "Remote Project Manager: Export Milestone Context for AI Agents"
+        "title": "%command.exportMilestoneContext.title%"
       },
       {
         "command": "remoteProjectManager.createBranchForIssue",
-        "title": "Remote Project Manager: Create Branch for Issue",
+        "title": "%command.createBranchForIssue.title%",
         "icon": "$(git-branch)"
       },
       {
         "command": "remoteProjectManager.openIssueInBrowser",
-        "title": "Remote Project Manager: Open Issue in Browser",
+        "title": "%command.openIssueInBrowser.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "remoteProjectManager.runDiagnostics",
-        "title": "Remote Project Manager: Run Diagnostics"
+        "title": "%command.runDiagnostics.title%"
       },
       {
         "command": "remoteProjectManager.installCommitMsgHook",
-        "title": "Remote Project Manager: Install Commit Message Hook"
+        "title": "%command.installCommitMsgHook.title%"
       },
       {
         "command": "remoteProjectManager.uninstallCommitMsgHook",
-        "title": "Remote Project Manager: Uninstall Commit Message Hook"
+        "title": "%command.uninstallCommitMsgHook.title%"
       },
       {
         "command": "remoteProjectManager.createIssueFromSelection",
-        "title": "Remote Project Manager: Create Issue from Selection"
+        "title": "%command.createIssueFromSelection.title%"
       },
       {
         "command": "remoteProjectManager.createIssueFromTodo",
-        "title": "Remote Project Manager: Create Issue from TODO"
+        "title": "%command.createIssueFromTodo.title%"
       },
       {
         "command": "remoteProjectManager.openIssueByNumber",
-        "title": "Remote Project Manager: Open Issue by Number"
+        "title": "%command.openIssueByNumber.title%"
+      },
+      {
+        "command": "remoteProjectManager.openWalkthrough",
+        "title": "%command.openWalkthrough.title%"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "remoteProjectManager",
-          "title": "Remote Project Manager",
+          "title": "%viewsContainer.remoteProjectManager.title%",
           "icon": "media/activity-icon.svg"
         }
       ]
@@ -121,18 +125,18 @@
       "remoteProjectManager": [
         {
           "id": "remoteProjectManager.sidebar",
-          "name": "Remote Project Manager"
+          "name": "%view.sidebar.name%"
         }
       ]
     },
     "viewsWelcome": [
       {
         "view": "remoteProjectManager.sidebar",
-        "contents": "Manage GitHub and GitLab Issues and Milestones from a central panel.\n[Open Panel](command:remoteProjectManager.openPanel)"
+        "contents": "%viewsWelcome.sidebar.contents%"
       }
     ],
     "configuration": {
-      "title": "Remote Project Manager",
+      "title": "%configuration.title%",
       "properties": {
         "remoteProjectManager.provider": {
           "type": "string",
@@ -141,64 +145,64 @@
             "gitlab"
           ],
           "default": "github",
-          "description": "Remote platform to connect to."
+          "description": "%configuration.provider.description%"
         },
         "remoteProjectManager.repository": {
           "type": "string",
           "default": "",
-          "description": "Fallback repository or project path, e.g. 'owner/repo'. Only used when no workspace folder has a recognized git 'origin' remote; the detected remote always wins."
+          "description": "%configuration.repository.description%"
         },
         "remoteProjectManager.gitlabHost": {
           "type": "string",
           "default": "",
-          "description": "Hostname of a self-hosted GitLab instance (e.g. 'gitlab.example.com'), used both to auto-detect repositories on that host and to connect to its API. Leave empty to use gitlab.com."
+          "description": "%configuration.gitlabHost.description%"
         },
         "remoteProjectManager.cacheTtlSeconds": {
           "type": "number",
           "default": 180,
           "minimum": 0,
-          "description": "How long issue/milestone/capability reads are cached before refetching, in seconds. Use the panel's Refresh button to bypass the cache immediately."
+          "description": "%configuration.cacheTtlSeconds.description%"
         },
         "remoteProjectManager.autoBranchOnInProgress": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically create and check out a git branch when an issue assigned to you moves to 'in-progress'. When off, a suggested branch name is shown instead."
+          "description": "%configuration.autoBranchOnInProgress.description%"
         },
         "remoteProjectManager.branchNamePattern": {
           "type": "string",
           "default": "${type}/${issue_id}-${slug}",
-          "description": "Pattern for auto-created branch names. Placeholders: ${type} (inferred from labels, e.g. fix/feature/docs/issue), ${issue_id} (issue number), ${slug} (sanitized title)."
+          "description": "%configuration.branchNamePattern.description%"
         },
         "remoteProjectManager.aiContextFile": {
           "type": "string",
           "default": ".github/copilot-instructions.md",
-          "description": "Workspace-relative path 'Export Milestone Context for AI Agents' writes to. Only the extension-managed section (between HTML comment markers) is replaced on re-export; the rest of the file, if any, is left untouched."
+          "description": "%configuration.aiContextFile.description%"
         },
         "remoteProjectManager.syncMarkInProgressOnCommit": {
           "type": "boolean",
           "default": true,
-          "description": "Add the 'in-progress' label to an issue assigned to you after your first commit on its branch."
+          "description": "%configuration.syncMarkInProgressOnCommit.description%"
         },
         "remoteProjectManager.syncRemindMissingIssue": {
           "type": "boolean",
           "default": true,
-          "description": "Remind you once per branch when you commit on a branch whose name does not reference an issue."
+          "description": "%configuration.syncRemindMissingIssue.description%"
         },
         "remoteProjectManager.syncProposeCloseOnMerge": {
           "type": "boolean",
           "default": true,
-          "description": "Offer to close an open issue assigned to you when a commit on the default branch already closes it (Fixes/Closes/Resolves #N)."
+          "description": "%configuration.syncProposeCloseOnMerge.description%"
         },
         "remoteProjectManager.todoCodeLens": {
           "type": "boolean",
           "default": true,
-          "description": "Show a CodeLens and clickable link on TODO/FIXME comments: the linked issue (TODO #12), or 'Create issue from TODO'."
+          "description": "%configuration.todoCodeLens.description%"
         },
         "remoteProjectManager.autoRefreshSeconds": {
           "type": "number",
           "default": 300,
           "minimum": 0,
-          "description": "How often (in seconds) to refresh the sidebar and the open panel while the window is focused. Values under 30 are raised to 30; 0 turns automatic refresh off. Reads still go through the cache (see cacheTtlSeconds)."
+          "description": "%configuration.autoRefreshSeconds.description%"
         }
       }
     },
@@ -303,6 +307,60 @@
         "key": "ctrl+alt+r r",
         "mac": "cmd+alt+r r"
       }
+    ],
+    "walkthroughs": [
+      {
+        "id": "getStarted",
+        "title": "%walkthrough.getStarted.title%",
+        "description": "%walkthrough.getStarted.description%",
+        "steps": [
+          {
+            "id": "connect",
+            "title": "%walkthrough.step.connect.title%",
+            "description": "%walkthrough.step.connect.description%",
+            "media": {
+              "markdown": "media/walkthrough/connect.md"
+            },
+            "completionEvents": [
+              "onCommand:remoteProjectManager.openPanel"
+            ]
+          },
+          {
+            "id": "provider",
+            "title": "%walkthrough.step.provider.title%",
+            "description": "%walkthrough.step.provider.description%",
+            "media": {
+              "markdown": "media/walkthrough/provider.md"
+            },
+            "completionEvents": [
+              "onSettingChanged:remoteProjectManager.provider",
+              "onSettingChanged:remoteProjectManager.gitlabHost"
+            ]
+          },
+          {
+            "id": "issue",
+            "title": "%walkthrough.step.issue.title%",
+            "description": "%walkthrough.step.issue.description%",
+            "media": {
+              "markdown": "media/walkthrough/issue.md"
+            },
+            "completionEvents": [
+              "onCommand:remoteProjectManager.newIssue"
+            ]
+          },
+          {
+            "id": "commit",
+            "title": "%walkthrough.step.commit.title%",
+            "description": "%walkthrough.step.commit.description%",
+            "media": {
+              "markdown": "media/walkthrough/commit.md"
+            },
+            "completionEvents": [
+              "onCommand:remoteProjectManager.composeCommit"
+            ]
+          }
+        ]
+      }
     ]
   },
   "scripts": {
@@ -339,5 +397,6 @@
     "@gitbeaker/rest": "^43.8.0",
     "@octokit/rest": "^22.0.1",
     "simple-git": "^3.36.0"
-  }
+  },
+  "l10n": "./l10n"
 }

@@ -91,6 +91,9 @@ export interface IProjectProvider {
   /** Label names available on this repository, for a labels picker. */
   listLabels(options?: FetchOptions): Promise<readonly string[]>;
 
+  /** Label name to hex colour (`rrggbb`, no `#`), for labels the provider colours. */
+  listLabelColors(options?: FetchOptions): Promise<Readonly<Record<string, string>>>;
+
   /** Usernames that can be assigned to an issue on this repository. */
   listAssignableUsers(options?: FetchOptions): Promise<readonly string[]>;
 }
