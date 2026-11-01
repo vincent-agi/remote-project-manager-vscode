@@ -155,6 +155,10 @@ New to the extension? Run **Remote Project Manager: Open Walkthrough** (or click
 
 The extension follows VS Code's display language: English and French are provided (manifest, notifications, panel and Git Graph). To add a language, add `package.nls.<lang>.json` and `l10n/bundle.l10n.<lang>.json` next to the French ones, plus a table like the one in `src/webview-ui/translations.ts`; tests fail if a message is left untranslated or a placeholder is lost. The walkthrough pages in `media/walkthrough` are English only.
 
+### Gitea and Forgejo
+
+Besides GitHub and GitLab, the extension works with a [Gitea](https://about.gitea.com) or [Forgejo](https://forgejo.org) instance: set `remoteProjectManager.giteaHost` to its hostname (the `origin` remote is then recognized automatically) and create an access token with read/write access to issues. Issues, milestones, labels, assignees and comments are supported. Two differences to know: Gitea's pull request form cannot be prefilled, so **Create PR from Issue** copies the title and description to the clipboard and opens the compare page; and milestones are numbered by their id. Bitbucket is not supported yet.
+
 ### Several repositories in one workspace
 
 With several workspace folders on different repositories, the first time you open the panel you pick one. The choice is remembered per workspace and followed by the sidebar, the status bar and every command. Switch at any time from the drop-down in the panel, the sidebar's title bar, or **Remote Project Manager: Select Repository**.
@@ -174,9 +178,10 @@ Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kb
 
 | Setting                                           | Type                   | Default                             | Description                                                                                                                                                                        |
 | ------------------------------------------------- | ---------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `remoteProjectManager.provider`                   | `"github" \| "gitlab"` | `"github"`                          | Remote platform to connect to. Ignored when the repository is auto-detected from a git remote.                                                                                     |
+| `remoteProjectManager.provider`                   | `"github" \| "gitlab" \| "gitea"` | `"github"`                          | Remote platform to connect to. Ignored when the repository is auto-detected from a git remote.                                                                                     |
 | `remoteProjectManager.repository`                 | `string`               | `""`                                | Repository or project path, e.g. `"owner/repo"`. Fallback used only when no git remote is detected; the workspace's git remote always wins.                                        |
 | `remoteProjectManager.gitlabHost`                 | `string`               | `""`                                | Hostname of a self-hosted GitLab instance (e.g. `"gitlab.example.com"`), used to both auto-detect repositories on that host and connect to its API. Leave empty to use gitlab.com. |
+| `remoteProjectManager.giteaHost` | `string` | `""` | Hostname of a Gitea/Forgejo instance (e.g. `git.example.com`), used to detect its repositories and to reach its API. Required for Gitea. |
 | `remoteProjectManager.cacheTtlSeconds`            | `number`               | `180`                               | How long issue/milestone/capability reads are cached before refetching, in seconds. Use the panel's Refresh button to bypass the cache immediately.                                |
 | `remoteProjectManager.autoBranchOnInProgress`     | `boolean`              | `true`                              | Automatically create and check out a git branch when an issue assigned to you moves to "in progress." When off, a suggested branch name is shown instead.                          |
 | `remoteProjectManager.branchNamePattern`          | `string`               | `"${type}/${issue_id}-${slug}"`     | Pattern for auto-created branch names. Placeholders: `${type}` (inferred from labels), `${issue_id}` (issue number), `${slug}` (sanitized title).                                  |

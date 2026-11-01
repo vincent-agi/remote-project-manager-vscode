@@ -1,6 +1,6 @@
 {
   "displayName": "Remote Project Manager",
-  "description": "Consultez et gérez les issues et jalons GitHub et GitLab depuis un panneau central dans VS Code.",
+  "description": "Consultez et gérez les issues et jalons GitHub, GitLab et Gitea depuis un panneau central dans VS Code.",
   "command.openPanel.title": "Remote Project Manager : Ouvrir le panneau",
   "command.signOutGitLab.title": "Remote Project Manager : Se déconnecter de GitLab",
   "command.newIssue.title": "Remote Project Manager : Nouvelle issue",
@@ -26,7 +26,7 @@
   "view.sidebar.name": "Remote Project Manager",
   "viewsWelcome.sidebar.contents": "Gérez les issues et jalons GitHub et GitLab depuis un panneau central.\n[Ouvrir le panneau](command:remoteProjectManager.openPanel)\n[Démarrer](command:remoteProjectManager.openWalkthrough)",
   "configuration.title": "Remote Project Manager",
-  "configuration.provider.description": "Plateforme distante à laquelle se connecter.",
+  "configuration.provider.description": "Plateforme distante à laquelle se connecter (github, gitlab ou gitea).",
   "configuration.repository.description": "Dépôt ou chemin de projet de repli, par ex. 'owner/repo'. Utilisé uniquement quand aucun dossier de l'espace de travail n'a de remote git 'origin' reconnu ; le remote détecté est toujours prioritaire.",
   "configuration.gitlabHost.description": "Nom d'hôte d'une instance GitLab auto-hébergée (par ex. 'gitlab.example.com'), utilisé pour détecter les dépôts de cet hôte et pour joindre son API. Laissez vide pour utiliser gitlab.com.",
   "configuration.cacheTtlSeconds.description": "Durée, en secondes, pendant laquelle les lectures d'issues, de jalons et de droits sont mises en cache avant d'être relues. Utilisez le bouton Actualiser du panneau pour contourner immédiatement le cache.",
@@ -50,5 +50,6 @@
   "walkthrough.step.commit.description": "Composez un Conventional Commit avec un Gitmoji et une référence d'issue.\n[Composer un commit](command:remoteProjectManager.composeCommit)",
   "configuration.aiContextFiles.description": "Fichiers, relatifs à l'espace de travail, où écrit « Exporter le contexte du jalon pour les agents IA », par ex. '.github/copilot-instructions.md', 'CLAUDE.md', 'AGENTS.md', '.cursorrules'. Quand il est renseigné, il remplace 'aiContextFile'. Seule la section gérée par l'extension de chaque fichier est remplacée.",
   "configuration.aiContextAutoUpdate.description": "Réécrit automatiquement les fichiers de contexte IA exportés quand les issues du dernier jalon exporté changent. Seuls les fichiers dont le contenu a changé sont écrits.",
-  "command.selectRepository.title": "Remote Project Manager : Choisir le dépôt"
+  "command.selectRepository.title": "Remote Project Manager : Choisir le dépôt",
+  "configuration.giteaHost.description": "Nom d'hôte d'une instance Gitea ou Forgejo (par ex. 'git.example.com', ou 'https://git.example.com:3000' pour un schéma ou un port particulier), utilisé pour détecter les dépôts de cet hôte et pour joindre son API. Obligatoire pour utiliser Gitea."
 }

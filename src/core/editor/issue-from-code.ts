@@ -1,3 +1,4 @@
+import { giteaBaseUrl } from "../git/compare-url";
 import type { ProviderKind } from "../models/issue.model";
 
 /** Where a piece of code lives, for building a permalink. */
@@ -5,6 +6,7 @@ export interface CodeLocation {
   readonly providerKind: ProviderKind;
   readonly repository: string;
   readonly gitlabHost?: string;
+  readonly giteaHost?: string;
   /** Commit SHA the permalink pins to. */
   readonly sha: string;
   /** Path relative to the repository root, using `/`. */
@@ -23,6 +25,12 @@ export function buildPermalink(location: CodeLocation): string {
       ? `#L${location.startLine}`
       : `#L${location.startLine}-L${location.endLine}`;
     return `https://github.com/${location.repository}/blob/${location.sha}/${encodedPath}${anchor}`;
+  }
+  if (location.providerKind === "gitea") {
+    const anchor = single
+      ? `#L${location.startLine}`
+      : `#L${location.startLine}-L${location.endLine}`;
+    return `${giteaBaseUrl(location.giteaHost)}/${location.repository}/src/commit/${location.sha}/${encodedPath}${anchor}`;
   }
   const host = location.gitlabHost || "gitlab.com";
   const anchor = single ? `#L${location.startLine}` : `#L${location.startLine}-${location.endLine}`;

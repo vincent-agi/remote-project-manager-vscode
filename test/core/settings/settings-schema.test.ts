@@ -47,7 +47,7 @@ describe("validateSettingValue", () => {
     expect(validateSettingValue(descriptor("provider"), "gitlab").ok).toBe(true);
     expect(validateSettingValue(descriptor("provider"), "bitbucket")).toEqual({
       ok: false,
-      reason: "Expected one of: github, gitlab.",
+      reason: "Expected one of: github, gitlab, gitea.",
     });
   });
 });

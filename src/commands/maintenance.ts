@@ -244,6 +244,7 @@ export async function runDiagnostics(context: vscode.ExtensionContext): Promise<
           token,
           config.get<number>("cacheTtlSeconds", 180),
           config.get<string>("gitlabHost", "") || undefined,
+          config.get<string>("giteaHost", "") || undefined,
         );
         input.connection = {
           ok: true,

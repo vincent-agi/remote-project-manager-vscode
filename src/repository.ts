@@ -31,6 +31,7 @@ export async function resolveRepository(): Promise<RepositoryResolution> {
   const providerKindSetting = config.get<ProviderKind>("provider", "github");
   const repositorySetting = config.get<string>("repository", "");
   const gitlabHost = config.get<string>("gitlabHost", "") || undefined;
+  const giteaHost = config.get<string>("giteaHost", "") || undefined;
 
   const gitService = new SimpleGitService();
   const folders = vscode.workspace.workspaceFolders ?? [];
@@ -41,7 +42,7 @@ export async function resolveRepository(): Promise<RepositoryResolution> {
       remoteUrl: await gitService.getRemoteUrl(folder.uri.fsPath),
     })),
   );
-  return chooseRepository(resolveRepositoryCandidates(remotes, gitlabHost), {
+  return chooseRepository(resolveRepositoryCandidates(remotes, gitlabHost, giteaHost), {
     provider: providerKindSetting,
     repository: repositorySetting,
     fallbackFolderPath: folders[0]?.uri.fsPath,
@@ -200,7 +201,8 @@ export function registerRepositorySync(
       if (
         event.affectsConfiguration("remoteProjectManager.repository") ||
         event.affectsConfiguration("remoteProjectManager.provider") ||
-        event.affectsConfiguration("remoteProjectManager.gitlabHost")
+        event.affectsConfiguration("remoteProjectManager.gitlabHost") ||
+        event.affectsConfiguration("remoteProjectManager.giteaHost")
       ) {
         schedule();
       }

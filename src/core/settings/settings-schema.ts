@@ -29,11 +29,12 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
   {
     key: "provider",
     group: "connection",
-    kind: { type: "enum", values: ["github", "gitlab"] },
+    kind: { type: "enum", values: ["github", "gitlab", "gitea"] },
     scope: "workspace",
   },
   { key: "repository", group: "connection", kind: { type: "string" }, scope: "workspace" },
   { key: "gitlabHost", group: "connection", kind: { type: "string" }, scope: "workspace" },
+  { key: "giteaHost", group: "connection", kind: { type: "string" }, scope: "workspace" },
   { key: "cacheTtlSeconds", group: "connection", kind: { type: "number", min: 0 }, scope: "user" },
   {
     key: "autoRefreshSeconds",
@@ -92,6 +93,13 @@ export function describeSetting(
       return {
         label: t("GitLab host"),
         hint: t("Hostname of a self-hosted GitLab (empty for gitlab.com)."),
+      };
+    case "giteaHost":
+      return {
+        label: t("Gitea host"),
+        hint: t(
+          "Hostname of your Gitea/Forgejo instance, e.g. git.example.com (required for Gitea).",
+        ),
       };
     case "cacheTtlSeconds":
       return {

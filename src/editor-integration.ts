@@ -164,15 +164,16 @@ async function resolvePermalink(
     if (relativePath.startsWith("..")) {
       return { relativePath: fallback };
     }
-    const gitlabHost =
-      vscode.workspace.getConfiguration("remoteProjectManager").get<string>("gitlabHost", "") ||
-      undefined;
+    const settings = vscode.workspace.getConfiguration("remoteProjectManager");
+    const gitlabHost = settings.get<string>("gitlabHost", "") || undefined;
+    const giteaHost = settings.get<string>("giteaHost", "") || undefined;
     return {
       relativePath,
       permalink: buildPermalink({
         providerKind: resolution.providerKind,
         repository: resolution.repository,
         gitlabHost,
+        giteaHost,
         sha: await gitService.getHeadSha(resolution.folderPath),
         path: relativePath,
         startLine: request.startLine,

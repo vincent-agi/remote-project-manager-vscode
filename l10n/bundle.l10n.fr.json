@@ -215,5 +215,8 @@
   "This workspace has only one repository.": "Cet espace de travail ne contient qu'un seul dépôt.",
   "Current repository": "Dépôt actuel",
   "Select the repository to work with": "Choisissez le dépôt avec lequel travailler",
-  "Repository": "Dépôt"
+  "Repository": "Dépôt",
+  "Gitea host": "Hôte Gitea",
+  "Hostname of your Gitea/Forgejo instance, e.g. git.example.com (required for Gitea).": "Nom d'hôte de votre instance Gitea/Forgejo, par ex. git.example.com (obligatoire pour Gitea).",
+  "The title and description were copied to the clipboard: paste them into the Gitea pull request form.": "Le titre et la description ont été copiés dans le presse-papiers : collez-les dans le formulaire de pull request Gitea."
 }

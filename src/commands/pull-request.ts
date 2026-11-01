@@ -154,9 +154,9 @@ export async function createPrFromIssue(
     );
   }
 
-  const gitlabHost =
-    vscode.workspace.getConfiguration("remoteProjectManager").get<string>("gitlabHost", "") ||
-    undefined;
+  const settings = vscode.workspace.getConfiguration("remoteProjectManager");
+  const gitlabHost = settings.get<string>("gitlabHost", "") || undefined;
+  const giteaHost = settings.get<string>("giteaHost", "") || undefined;
   const url = buildCompareUrl({
     providerKind: resolution.providerKind,
     repository: resolution.repository,
@@ -165,9 +165,19 @@ export async function createPrFromIssue(
     title: title.trim(),
     body,
     gitlabHost,
+    giteaHost,
     draft: stateChoice.draft,
     reviewers,
     labels,
   });
+  if (resolution.providerKind === "gitea") {
+    // Gitea's compare page cannot be prefilled, so hand over title and body through the clipboard.
+    await vscode.env.clipboard.writeText(`${title.trim()}\n\n${body}`);
+    void vscode.window.showInformationMessage(
+      vscode.l10n.t(
+        "The title and description were copied to the clipboard: paste them into the Gitea pull request form.",
+      ),
+    );
+  }
   await vscode.env.openExternal(vscode.Uri.parse(url));
 }

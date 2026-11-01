@@ -9,6 +9,20 @@ const base = {
   body: "b",
 };
 
+describe("buildCompareUrl for Gitea", () => {
+  it("builds the compare page on the configured host (no prefill parameters)", () => {
+    expect(buildCompareUrl({ ...base, providerKind: "gitea", giteaHost: "git.example.com" })).toBe(
+      "https://git.example.com/o/r/compare/main...fix%2F1-x",
+    );
+  });
+
+  it("keeps an explicit scheme and port, and drops a trailing slash", () => {
+    expect(
+      buildCompareUrl({ ...base, providerKind: "gitea", giteaHost: "http://localhost:3000/" }),
+    ).toBe("http://localhost:3000/o/r/compare/main...fix%2F1-x");
+  });
+});
+
 describe("buildCompareUrl", () => {
   it("builds a GitHub compare URL", () => {
     const url = new URL(buildCompareUrl({ ...base, providerKind: "github" }));

@@ -9,6 +9,8 @@ export interface CompareUrlInput {
   readonly title: string;
   readonly body: string;
   readonly gitlabHost?: string;
+  /** Hostname (optionally with scheme/port) of a Gitea instance. */
+  readonly giteaHost?: string;
   /** Open as a draft PR / "Draft:" merge request. */
   readonly draft?: boolean;
   /** GitHub only: GitLab's form identifies reviewers by numeric id, not by name. */
@@ -18,6 +20,15 @@ export interface CompareUrlInput {
 }
 
 const GITLAB_DRAFT_PREFIX = "Draft: ";
+
+/** `https://host` for a configured Gitea host; keeps an explicit scheme and port, drops a trailing slash. */
+export function giteaBaseUrl(giteaHost: string | undefined): string {
+  const host = (giteaHost ?? "").trim().replace(/\/+$/, "");
+  if (!host) {
+    return "https://gitea.com";
+  }
+  return /^https?:\/\//i.test(host) ? host : `https://${host}`;
+}
 
 /**
  * Builds a prefilled GitHub compare or GitLab merge-request URL. Drafts
@@ -37,6 +48,10 @@ export function buildCompareUrl(input: CompareUrlInput): string {
       params.set("labels", input.labels.join(","));
     }
     return `https://github.com/${repository}/compare/${encodeURIComponent(baseBranch)}...${encodeURIComponent(headBranch)}?${params.toString()}`;
+  }
+  if (providerKind === "gitea") {
+    // Gitea's compare page takes no title/body parameters; callers hand the body over separately.
+    return `${giteaBaseUrl(input.giteaHost)}/${repository}/compare/${encodeURIComponent(baseBranch)}...${encodeURIComponent(headBranch)}`;
   }
   const host = input.gitlabHost || "gitlab.com";
   const params = new URLSearchParams({

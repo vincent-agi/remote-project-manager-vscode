@@ -11,6 +11,9 @@ import type {
 } from "./core/providers/project-provider.interface";
 import { GithubProvider, type GithubClient } from "./providers/github/github.provider";
 import { GitlabProvider, type GitlabClient } from "./providers/gitlab/gitlab.provider";
+import { createGiteaClient } from "./providers/gitea/gitea.client";
+import { GiteaProvider } from "./providers/gitea/gitea.provider";
+import { giteaBaseUrl } from "./core/git/compare-url";
 import { CachingProjectProvider } from "./providers/caching-project-provider";
 import { resolveRepository } from "./repository";
 import { state } from "./state";
@@ -30,9 +33,20 @@ export function makeCredentialStore(secrets: vscode.SecretStorage): ICredentialS
   };
 }
 
+function providerDisplayName(provider: ProviderKind): string {
+  switch (provider) {
+    case "github":
+      return "GitHub";
+    case "gitlab":
+      return "GitLab";
+    case "gitea":
+      return "Gitea";
+  }
+}
+
 async function promptForToken(provider: ProviderKind): Promise<string | undefined> {
   return vscode.window.showInputBox({
-    title: vscode.l10n.t("{0} Personal Access Token", provider === "github" ? "GitHub" : "GitLab"),
+    title: vscode.l10n.t("{0} Personal Access Token", providerDisplayName(provider)),
     prompt: vscode.l10n.t(
       "Enter a {0} personal access token with repo/issue read-write scope.",
       provider,
@@ -75,11 +89,21 @@ function buildProvider(
   repository: string,
   token: string,
   gitlabHost?: string,
+  giteaHost?: string,
 ): IProjectProvider {
   const [owner, repo] = repository.split("/");
   if (providerKind === "github") {
     const octokit = new Octokit({ auth: token });
     return new GithubProvider(octokit.rest as unknown as GithubClient, owner, repo);
+  }
+  if (providerKind === "gitea") {
+    const baseUrl = giteaBaseUrl(giteaHost);
+    return new GiteaProvider(
+      createGiteaClient(baseUrl, token),
+      owner,
+      repo,
+      `${baseUrl}/${repository}`,
+    );
   }
   const gitlab = new Gitlab(gitlabHost ? { token, host: `https://${gitlabHost}` } : { token });
   return new GitlabProvider(gitlab as unknown as GitlabClient, repository);
@@ -92,9 +116,10 @@ export async function connectProvider(
   token: string,
   cacheTtlSeconds: number,
   gitlabHost: string | undefined,
+  giteaHost?: string,
 ): Promise<{ provider: IProjectProvider; currentUser: IAuthenticatedUser }> {
   const provider = new CachingProjectProvider(
-    buildProvider(providerKind, repository, token, gitlabHost),
+    buildProvider(providerKind, repository, token, gitlabHost, giteaHost),
     cacheTtlSeconds * 1000,
   );
   const currentUser = await provider.getCurrentUser();
@@ -114,17 +139,34 @@ async function resolveAndConnect(
   credentialStore: ICredentialStore,
   cacheTtlSeconds: number,
   gitlabHost: string | undefined,
+  giteaHost: string | undefined,
 ): Promise<{ provider: IProjectProvider; currentUser: IAuthenticatedUser }> {
   const token = await resolveToken(providerKind, credentialStore);
   try {
-    return await connectProvider(providerKind, repository, token, cacheTtlSeconds, gitlabHost);
+    return await connectProvider(
+      providerKind,
+      repository,
+      token,
+      cacheTtlSeconds,
+      gitlabHost,
+      giteaHost,
+    );
   } catch (error) {
-    if (providerKind !== "gitlab" || !isAuthError(error)) {
+    // GitHub's session is managed by VS Code itself; for the token-based
+    // platforms a rejected token is cleared and asked for once more.
+    if (providerKind === "github" || !isAuthError(error)) {
       throw error;
     }
     await credentialStore.setToken(providerKind, "");
     const freshToken = await resolveToken(providerKind, credentialStore);
-    return connectProvider(providerKind, repository, freshToken, cacheTtlSeconds, gitlabHost);
+    return connectProvider(
+      providerKind,
+      repository,
+      freshToken,
+      cacheTtlSeconds,
+      gitlabHost,
+      giteaHost,
+    );
   }
 }
 
@@ -145,7 +187,15 @@ export async function connectRepository(
   const config = vscode.workspace.getConfiguration("remoteProjectManager");
   const cacheTtlSeconds = config.get<number>("cacheTtlSeconds", 180);
   const gitlabHost = config.get<string>("gitlabHost", "") || undefined;
-  return resolveAndConnect(providerKind, repository, credentialStore, cacheTtlSeconds, gitlabHost);
+  const giteaHost = config.get<string>("giteaHost", "") || undefined;
+  return resolveAndConnect(
+    providerKind,
+    repository,
+    credentialStore,
+    cacheTtlSeconds,
+    gitlabHost,
+    giteaHost,
+  );
 }
 
 /**
