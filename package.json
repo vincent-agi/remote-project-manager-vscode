@@ -81,6 +81,10 @@
         "command": "remoteProjectManager.openIssueInBrowser",
         "title": "Remote Project Manager: Open Issue in Browser",
         "icon": "$(link-external)"
+      },
+      {
+        "command": "remoteProjectManager.runDiagnostics",
+        "title": "Remote Project Manager: Run Diagnostics"
       }
     ],
     "viewsContainers": {

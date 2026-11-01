@@ -30,6 +30,8 @@ import type { InboundMessage, RepositoryOptionView } from "./webview/messages";
 import { getWebviewHtml } from "./webview/webview-html";
 import { extractIssueNumberFromBranch } from "./core/git/branch-issue-ref";
 import { IssueStatusBar } from "./status-bar";
+import { logger } from "./logger";
+import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
 import type { SyncState } from "./core/status/status-bar-model";
 import {
   buildCommitMessage,
@@ -725,6 +727,10 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
       });
       return selectMyOpenIssues(issues, connection.currentUser.username);
     } catch (error) {
+      logger.warn(
+        isAuthError(error) ? "Sidebar: authentication failed" : "Sidebar: could not load issues",
+        error,
+      );
       this.syncEmitter.fire({
         sync: { kind: isAuthError(error) ? "auth-error" : "unavailable" },
         folderPath: folderPath ?? this.lastFolderPath,
@@ -777,6 +783,7 @@ async function syncWithRepository(
   context: vscode.ExtensionContext,
   treeDataProvider: MyIssuesTreeDataProvider,
 ): Promise<void> {
+  logger.info("Re-syncing with the loaded repository");
   treeDataProvider.refresh();
   if (!activePanel || openPanelInFlight) {
     return;
@@ -1504,6 +1511,68 @@ async function exportMilestoneContext(context: vscode.ExtensionContext): Promise
   void vscode.window.showInformationMessage(`Exported milestone context to ${relativePath}.`);
 }
 
+function readExtensionVersion(context: vscode.ExtensionContext): string {
+  const { version } = context.extension.packageJSON as { version?: unknown };
+  return typeof version === "string" ? version : "unknown";
+}
+
+/**
+ * "Run diagnostics" (#82): probes the remote detection, the stored token
+ * and (only when a token already exists, so no prompt is ever raised) the
+ * connection and its capabilities, then shows the report in the output
+ * channel and offers to copy it.
+ */
+async function runDiagnostics(context: vscode.ExtensionContext): Promise<void> {
+  const resolution = await resolveRepository();
+  const input: {
+    -readonly [K in keyof DiagnosticsInput]: DiagnosticsInput[K];
+  } = {
+    extensionVersion: readExtensionVersion(context),
+    vscodeVersion: vscode.version,
+    resolution,
+    tokenStored: false,
+  };
+
+  if (resolution.kind === "resolved") {
+    input.tokenProvider = resolution.providerKind;
+    const token = await context.secrets.get(secretKeyFor(resolution.providerKind));
+    input.tokenStored = Boolean(token);
+    if (token) {
+      try {
+        const config = vscode.workspace.getConfiguration("remoteProjectManager");
+        const { provider, currentUser } = await connectProvider(
+          resolution.providerKind,
+          resolution.repository,
+          token,
+          config.get<number>("cacheTtlSeconds", 180),
+          config.get<string>("gitlabHost", "") || undefined,
+        );
+        input.connection = {
+          ok: true,
+          username: currentUser.username,
+          capabilities: await provider.getCapabilities({ forceRefresh: true }),
+        };
+      } catch (error) {
+        input.connection = {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+  }
+
+  const report = formatDiagnosticsReport(input);
+  logger.info(`\n${report}`);
+  logger.show();
+  const choice = await vscode.window.showInformationMessage(
+    "Diagnostics written to the 'Remote Project Manager' output channel.",
+    "Copy report",
+  );
+  if (choice === "Copy report") {
+    await vscode.env.clipboard.writeText(report);
+  }
+}
+
 /** Tree action (#80): creates and switches to a branch for the clicked issue. */
 async function createBranchForTreeIssue(
   context: vscode.ExtensionContext,
@@ -1548,8 +1617,10 @@ export interface RemoteProjectManagerApi {
 export function activate(context: vscode.ExtensionContext): RemoteProjectManagerApi {
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
   const statusBar = new IssueStatusBar();
+  logger.info("Remote Project Manager activated");
   context.subscriptions.push(
     statusBar,
+    new vscode.Disposable(() => logger.dispose()),
     treeDataProvider.onDidSync(({ sync, folderPath }) => statusBar.update(sync, folderPath)),
   );
   registerRepositorySync(context, treeDataProvider);
@@ -1571,6 +1642,9 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     }),
     vscode.commands.registerCommand("remoteProjectManager.newMilestone", () => {
       void openPanel(context, { kind: "newMilestone" });
+    }),
+    vscode.commands.registerCommand("remoteProjectManager.runDiagnostics", () => {
+      void runDiagnostics(context);
     }),
     vscode.commands.registerCommand("remoteProjectManager.refresh", () => {
       void openPanel(context, { kind: "refresh" });
