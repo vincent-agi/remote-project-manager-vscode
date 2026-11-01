@@ -615,3 +615,102 @@ kbd {
   padding: 0;
   border: none;
 }
+
+.graph-page {
+  padding: 0 8px 8px;
+}
+
+.graph-page .board-note {
+  margin: 8px 0;
+}
+
+.graph-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.graph-row:hover,
+.graph-row:focus-visible {
+  background-color: var(--vscode-list-hoverBackground);
+  outline: none;
+}
+
+.graph-svg {
+  flex: 0 0 auto;
+}
+
+.graph-svg line {
+  stroke-width: 2;
+  fill: none;
+}
+
+.graph-svg .node {
+  stroke: var(--vscode-editor-background);
+  stroke-width: 1;
+}
+
+.graph-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.graph-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-meta {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85em;
+}
+
+.badge.ref {
+  color: var(--vscode-badge-foreground);
+  background-color: var(--vscode-badge-background);
+}
+
+.badge.ref.head {
+  font-weight: 700;
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.lane-0 {
+  stroke: var(--vscode-charts-blue);
+  fill: var(--vscode-charts-blue);
+}
+.lane-1 {
+  stroke: var(--vscode-charts-green);
+  fill: var(--vscode-charts-green);
+}
+.lane-2 {
+  stroke: var(--vscode-charts-orange);
+  fill: var(--vscode-charts-orange);
+}
+.lane-3 {
+  stroke: var(--vscode-charts-purple);
+  fill: var(--vscode-charts-purple);
+}
+.lane-4 {
+  stroke: var(--vscode-charts-red);
+  fill: var(--vscode-charts-red);
+}
+.lane-5 {
+  stroke: var(--vscode-charts-yellow);
+  fill: var(--vscode-charts-yellow);
+}
+.lane-6 {
+  stroke: var(--vscode-terminal-ansiCyan);
+  fill: var(--vscode-terminal-ansiCyan);
+}
+.lane-7 {
+  stroke: var(--vscode-terminal-ansiMagenta);
+  fill: var(--vscode-terminal-ansiMagenta);
+}

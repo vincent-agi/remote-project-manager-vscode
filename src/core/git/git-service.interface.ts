@@ -11,6 +11,19 @@ export interface GitLogEntry {
   readonly message: string;
 }
 
+/** A commit with the topology and decoration the graph view needs. */
+export interface GitGraphCommit {
+  readonly hash: string;
+  readonly parents: readonly string[];
+  readonly author: string;
+  /** Author date, ISO 8601. */
+  readonly date: string;
+  /** Branch/tag names pointing at this commit (e.g. `main`, `origin/main`, `v1.0`). */
+  readonly refs: readonly string[];
+  /** Full commit message (subject + body). */
+  readonly message: string;
+}
+
 /**
  * Abstract contract for the git operations this extension needs:
  * detecting a repository's remote (for multi-root workspace resolution)
@@ -55,6 +68,15 @@ export interface IGitService {
    * when `range` is omitted. `maxCount` caps the number of commits read.
    */
   log(cwd: string, range?: string, maxCount?: number): Promise<GitLogEntry[]>;
+
+  /**
+   * Reads up to `maxCount` commits across all branches in topological order
+   * (children before parents), with parents, author, date and ref decorations.
+   */
+  getGraphLog(cwd: string, maxCount: number): Promise<GitGraphCommit[]>;
+
+  /** The commit's diff as a unified patch (`git show`), for viewing when no diff UI is available. */
+  getCommitPatch(cwd: string, hash: string): Promise<string>;
 
   /** Full SHA of the commit `HEAD` points to. */
   getHeadSha(cwd: string): Promise<string>;

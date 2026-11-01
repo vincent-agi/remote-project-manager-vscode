@@ -103,3 +103,35 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 </body>
 </html>`;
 }
+
+/** HTML shell for the Git Graph panel; its logic lives in `dist/webview-ui/git-graph.js`. */
+export function getGitGraphHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+  const scriptUri = webview.asWebviewUri(
+    vscode.Uri.joinPath(extensionUri, "dist", "webview-ui", "git-graph.js"),
+  );
+  const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, "media", "style.css"));
+  const nonce = String(Math.floor(Math.random() * 1e18));
+
+  return /* html */ `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};"
+  />
+  <link href="${styleUri.toString()}" rel="stylesheet" />
+  <title>Git Graph</title>
+</head>
+<body class="graph-page">
+  <div class="list-toolbar">
+    <select id="issue-filter" title="Filter by issue"><option value="">All commits</option></select>
+    <input id="text-filter" type="text" placeholder="Filter by message, author or hash…" />
+    <button id="refresh" class="tab" type="button">&#8635; Refresh</button>
+  </div>
+  <p id="graph-note" class="board-note">Loading…</p>
+  <div id="graph" class="graph" role="list"></div>
+  <script nonce="${nonce}" type="module" src="${scriptUri.toString()}"></script>
+</body>
+</html>`;
+}
