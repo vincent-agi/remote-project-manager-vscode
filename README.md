@@ -167,6 +167,7 @@ Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kb
 | `remoteProjectManager.syncRemindMissingIssue`     | `boolean`              | `true`                              | Remind you once per branch when you commit on a branch that references no issue.                                                                                                   |
 | `remoteProjectManager.syncProposeCloseOnMerge`    | `boolean`              | `true`                              | Offer to close an open issue already closed by a `Fixes/Closes/Resolves #N` commit on the default branch.                                                                          |
 | `remoteProjectManager.todoCodeLens`               | `boolean`              | `true`                              | Show a CodeLens and link on `TODO`/`FIXME` comments (linked issue, or "Create issue from TODO").                                                                                   |
+| `remoteProjectManager.autoRefreshSeconds`         | `number`               | `300`                               | Refresh the sidebar and open panel at this interval while the window is focused (min 30, `0` = off). Also drives the activity-bar badge of issues assigned to you.                 |
 
 ## 4. Lessons learned
 

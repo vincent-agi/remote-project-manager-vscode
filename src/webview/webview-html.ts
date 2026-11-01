@@ -17,7 +17,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
   <meta charset="UTF-8" />
   <meta
     http-equiv="Content-Security-Policy"
-    content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';"
+    content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};"
   />
   <link href="${styleUri.toString()}" rel="stylesheet" />
   <title>Remote Project Manager</title>
@@ -30,7 +30,12 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
   </div>
 
   <div id="error-banner" class="error-banner" hidden></div>
+  <div id="cache-banner" class="cache-banner" role="status" hidden>
+    <span id="cache-banner-text"></span>
+    <button id="cache-banner-refresh" class="tab" type="button">Refresh now</button>
+  </div>
   <div id="toast" class="toast" hidden></div>
+  <div id="shortcut-help" class="shortcut-help" role="dialog" aria-label="Keyboard shortcuts" hidden></div>
 
   <div id="repository-picker" class="repository-picker" hidden>
     <p>Multiple repositories were found in this workspace. Pick one:</p>
@@ -51,9 +56,24 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
           <option value="open">Open</option>
           <option value="closed">Closed</option>
         </select>
+        <select id="issue-milestone-filter" title="Filter by milestone">
+          <option value="">All milestones</option>
+        </select>
+        <select id="issue-sort" title="Sort issues"></select>
+        <select id="issue-group" title="Group issues"></select>
+        <select id="issue-saved-filters" title="Apply a saved filter">
+          <option value="">Saved filters…</option>
+        </select>
+        <button id="issue-filter-save" class="tab" type="button" title="Save the current filter">Save filter…</button>
+        <button id="issue-filter-delete" class="tab" type="button" title="Delete this saved filter" hidden>Delete filter</button>
+        <span id="saved-filter-form" class="saved-filter-form" hidden>
+          <input id="saved-filter-name" type="text" placeholder="Filter name" />
+          <button id="saved-filter-confirm" class="tab" type="button">Save</button>
+          <button id="saved-filter-cancel" class="tab" type="button">Cancel</button>
+        </span>
         <button id="issue-new" class="tab" type="button" disabled>+ New Issue</button>
       </div>
-      <div class="list" id="issue-list"></div>
+      <div class="list" id="issue-list" aria-busy="true" aria-label="Loading issues"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
     </div>
     <div class="detail" id="issue-detail"></div>
   </div>
@@ -68,12 +88,12 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
         </select>
         <button id="milestone-new" class="tab" type="button" disabled>+ New Milestone</button>
       </div>
-      <div class="list" id="milestone-list"></div>
+      <div class="list" id="milestone-list" aria-busy="true" aria-label="Loading milestones"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
     </div>
     <div class="detail" id="milestone-detail"></div>
   </div>
 
-  <script nonce="${nonce}" src="${scriptUri.toString()}"></script>
+  <script nonce="${nonce}" type="module" src="${scriptUri.toString()}"></script>
 </body>
 </html>`;
 }

@@ -22,7 +22,16 @@ import {
 } from "./core/workspace/repository-resolver";
 import { generateBranchName } from "./core/automation/branch-name";
 import { shouldAutoCreateBranch } from "./core/automation/auto-branch-guard";
-import { selectMyOpenIssues, type MyIssueSummary } from "./core/tree/my-issues";
+import {
+  buildIssueDescription,
+  buildIssueTooltip,
+  groupMyIssues,
+  priorityOf,
+  selectMyOpenIssues,
+  workStatusOf,
+  type MyIssueGroup,
+  type MyIssueSummary,
+} from "./core/tree/my-issues";
 import { BranchManager } from "./core/git/branch-manager";
 import type { DirtyTreeDecision } from "./core/git/branch-manager.interface";
 import { pickDefaultBaseBranch } from "./core/git/pick-default-base-branch";
@@ -35,6 +44,11 @@ import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { StateSync } from "./state-sync";
+import {
+  describeAssignedBadge,
+  isPollDue,
+  normalizePollInterval,
+} from "./core/polling/poll-schedule";
 import { registerEditorIntegration } from "./editor-integration";
 import { logger } from "./logger";
 import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
@@ -54,6 +68,9 @@ import { formatMilestoneContext } from "./core/ai/milestone-context";
 import { replaceManagedSection } from "./core/ai/managed-section";
 import { resolveSafeRelativeSegments } from "./core/workspace/safe-relative-path";
 import type { IMilestone } from "./core/models/milestone.model";
+
+/** `workspaceState` key holding the panel's UI preferences (saved filters, sort order, ...). */
+const UI_PREFS_KEY = "remoteProjectManager.uiPrefs";
 
 function secretKeyFor(provider: ProviderKind): string {
   return `remoteProjectManager.token.${provider}`;
@@ -452,6 +469,18 @@ async function buildController(
         void openPanel(context);
       });
     },
+    {
+      get: () => context.workspaceState.get<Record<string, unknown>>(UI_PREFS_KEY, {}),
+      set: (prefs) => context.workspaceState.update(UI_PREFS_KEY, prefs),
+    },
+    () => {
+      // "Reconnect" button: drop the stored token and reopen the panel so
+      // the normal flow prompts for a fresh one.
+      void credentialStore.setToken(providerKind, "").then(() => {
+        panel.dispose();
+        void openPanel(context);
+      });
+    },
   );
 }
 
@@ -650,6 +679,9 @@ async function openPanelImpl(
   });
 }
 
+/** Theme colour per priority rank (0 = critical .. 3 = low). */
+const PRIORITY_COLORS = ["charts.red", "charts.orange", "charts.yellow", "charts.blue"] as const;
+
 /**
  * Populates the activity bar sidebar with the current user's assigned
  * open issues, so they're visible without opening the full panel. Lazily
@@ -666,10 +698,11 @@ async function openPanelImpl(
  * sidebar reveal — VS Code then falls back to the `viewsWelcome` entry's
  * "Open Panel" link, which goes through the full picker/error UX.
  */
-class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary> {
+class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary | MyIssueGroup> {
   private connection: { provider: IProjectProvider; currentUser: IAuthenticatedUser } | undefined;
   private connectionKey: string | undefined;
   private lastFolderPath: string | undefined;
+  private milestoneTitles = new Map<string, string>();
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changeEmitter.event;
   private readonly syncEmitter = new vscode.EventEmitter<{
@@ -678,6 +711,9 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
   }>();
   /** Fires with the connection state after every tree load, for the status bar. */
   readonly onDidSync = this.syncEmitter.event;
+  private readonly countEmitter = new vscode.EventEmitter<number>();
+  /** Fires with the number of open issues assigned to the user after every load. */
+  readonly onDidChangeAssignedCount = this.countEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -703,14 +739,41 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
     this.changeEmitter.fire();
   }
 
-  getTreeItem(element: MyIssueSummary): vscode.TreeItem {
+  getTreeItem(element: MyIssueSummary | MyIssueGroup): vscode.TreeItem {
+    if ("kind" in element) {
+      const group = new vscode.TreeItem(
+        `${element.label} (${element.issues.length})`,
+        vscode.TreeItemCollapsibleState.Expanded,
+      );
+      // A stable id lets VS Code remember each group's collapsed state.
+      group.id = `group:${element.status}`;
+      group.contextValue = "issueGroup";
+      group.iconPath = new vscode.ThemeIcon(
+        element.status === "in-progress"
+          ? "debug-start"
+          : element.status === "blocked"
+            ? "circle-slash"
+            : "circle-large-outline",
+      );
+      return group;
+    }
     const item = new vscode.TreeItem(
       `#${element.number} ${element.title}`,
       vscode.TreeItemCollapsibleState.None,
     );
-    item.tooltip = element.url;
+    const milestoneTitle = element.milestoneId
+      ? (this.milestoneTitles.get(element.milestoneId) ?? null)
+      : null;
+    const status = workStatusOf(element.labels);
+    const priority = priorityOf(element.labels);
+    item.id = element.id;
+    item.description = buildIssueDescription(element, milestoneTitle);
+    item.tooltip = new vscode.MarkdownString(buildIssueTooltip(element, milestoneTitle));
     item.contextValue = "issue";
-    item.iconPath = new vscode.ThemeIcon("issues");
+    item.iconPath = new vscode.ThemeIcon(
+      status === "in-progress" ? "sync" : status === "blocked" ? "error" : "issues",
+      priority ? new vscode.ThemeColor(PRIORITY_COLORS[priority.rank]) : undefined,
+    );
     item.command = {
       command: "remoteProjectManager.openIssueFromTree",
       title: "Open Issue",
@@ -719,7 +782,12 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
     return item;
   }
 
-  async getChildren(): Promise<MyIssueSummary[]> {
+  async getChildren(
+    element?: MyIssueSummary | MyIssueGroup,
+  ): Promise<(MyIssueSummary | MyIssueGroup)[]> {
+    if (element) {
+      return "kind" in element ? element.issues : [];
+    }
     let folderPath: string | undefined;
     try {
       this.syncEmitter.fire({ sync: { kind: "loading" }, folderPath: this.lastFolderPath });
@@ -737,7 +805,10 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
         },
         folderPath,
       });
-      return selectMyOpenIssues(issues, connection.currentUser.username);
+      const mine = selectMyOpenIssues(issues, connection.currentUser.username);
+      this.countEmitter.fire(mine.length);
+      await this.loadMilestoneTitles(connection.provider);
+      return groupMyIssues(mine);
     } catch (error) {
       logger.warn(
         isAuthError(error) ? "Sidebar: authentication failed" : "Sidebar: could not load issues",
@@ -755,6 +826,18 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
         this.connection = undefined;
       }
       return [];
+    }
+  }
+
+  /** Milestone titles for the tree descriptions; best-effort, titles are a nicety. */
+  private async loadMilestoneTitles(provider: IProjectProvider): Promise<void> {
+    try {
+      const milestones = await provider.listMilestones();
+      this.milestoneTitles = new Map(
+        milestones.map((milestone) => [milestone.id, milestone.title]),
+      );
+    } catch {
+      this.milestoneTitles = new Map();
     }
   }
 
@@ -1766,6 +1849,42 @@ async function createBranchForTreeIssue(
   }
 }
 
+/**
+ * Periodically refreshes the sidebar (and the open panel) so assigned
+ * issues and the activity-bar badge stay current without a manual
+ * Refresh. Polls only while the window is focused, catches up as soon as
+ * focus returns, and goes through the normal TTL cache, so the interval
+ * is also bounded below by `cacheTtlSeconds`.
+ */
+function startAutoRefresh(treeDataProvider: MyIssuesTreeDataProvider): vscode.Disposable {
+  let lastRunAt = Date.now();
+  const tick = (): void => {
+    const intervalSeconds = normalizePollInterval(
+      vscode.workspace.getConfiguration("remoteProjectManager").get<number>("autoRefreshSeconds"),
+    );
+    const now = Date.now();
+    if (
+      !isPollDue({ intervalSeconds, windowFocused: vscode.window.state.focused, lastRunAt, now })
+    ) {
+      return;
+    }
+    lastRunAt = now;
+    treeDataProvider.refresh();
+    void activeController?.handleMessage({ type: "requestState" });
+  };
+  // Finer than any allowed interval, so a due poll is never late by much.
+  const timer = setInterval(tick, 15_000);
+  const focusListener = vscode.window.onDidChangeWindowState((state) => {
+    if (state.focused) {
+      tick();
+    }
+  });
+  return new vscode.Disposable(() => {
+    clearInterval(timer);
+    focusListener.dispose();
+  });
+}
+
 /** API this extension exposes to other extensions (e.g. AI agents) via `extensions.getExtension(...).exports`. */
 export interface RemoteProjectManagerApi {
   /** The Markdown context block from the last "Copy Issue Context for AI" invocation, if any. */
@@ -1781,6 +1900,9 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     getActiveConnection: () => getActiveConnection(context),
     resolveRepository,
     refreshTree: () => treeDataProvider.refresh(),
+  });
+  const treeView = vscode.window.createTreeView("remoteProjectManager.sidebar", {
+    treeDataProvider,
   });
   const stateSync = new StateSync(
     context,
@@ -1873,7 +1995,11 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     vscode.commands.registerCommand("remoteProjectManager.exportMilestoneContext", () => {
       void exportMilestoneContext(context);
     }),
-    vscode.window.registerTreeDataProvider("remoteProjectManager.sidebar", treeDataProvider),
+    treeView,
+    treeDataProvider.onDidChangeAssignedCount((count) => {
+      treeView.badge = count > 0 ? describeAssignedBadge(count) : undefined;
+    }),
+    startAutoRefresh(treeDataProvider),
   );
 
   return {

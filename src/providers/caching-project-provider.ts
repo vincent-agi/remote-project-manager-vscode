@@ -6,6 +6,7 @@ import type {
   CreateMilestoneInput,
   FetchOptions,
   IAuthenticatedUser,
+  IFetchTimestamps,
   IProjectProvider,
   ProviderCapabilities,
   UpdateIssueInput,
@@ -30,9 +31,10 @@ const ASSIGNABLE_USERS_KEY = "assignableUsers";
  * edit is never stale — trading one extra network round trip for
  * correctness, which matters more than the cache hit rate here.
  */
-export class CachingProjectProvider implements IProjectProvider {
+export class CachingProjectProvider implements IProjectProvider, IFetchTimestamps {
   private readonly cache: TtlCache<unknown>;
   private readonly inFlight = new Map<string, Promise<unknown>>();
+  private issuesFetchedAt: number | undefined;
 
   constructor(
     private readonly inner: IProjectProvider,
@@ -66,6 +68,9 @@ export class CachingProjectProvider implements IProjectProvider {
     const promise = fetcher()
       .then((value) => {
         this.cache.set(key, value);
+        if (key === ISSUES_KEY) {
+          this.issuesFetchedAt = Date.now();
+        }
         return value;
       })
       .finally(() => {
@@ -73,6 +78,10 @@ export class CachingProjectProvider implements IProjectProvider {
       });
     this.inFlight.set(key, promise);
     return promise;
+  }
+
+  getIssuesFetchedAt(): number | undefined {
+    return this.issuesFetchedAt;
   }
 
   getCurrentUser(): Promise<IAuthenticatedUser> {
