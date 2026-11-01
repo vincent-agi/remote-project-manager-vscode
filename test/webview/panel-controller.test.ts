@@ -596,3 +596,46 @@ describe("PanelController connection feedback", () => {
     expect(onReconnect).toHaveBeenCalledOnce();
   });
 });
+
+describe("PanelController issue templates", () => {
+  it("answers requestIssueTemplates with the loaded templates", async () => {
+    const posted: { type: string; templates?: unknown }[] = [];
+    const templates = [{ name: "Bug", body: "b", labels: ["bug"] }];
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Promise.resolve(templates),
+    );
+
+    await controller.handleMessage({ type: "requestIssueTemplates" });
+
+    expect(posted).toEqual([{ type: "issueTemplates", templates }]);
+  });
+
+  it("falls back to an empty list when loading fails, and ignores the request without a loader", async () => {
+    const posted: { type: string; templates?: unknown }[] = [];
+    const failing = new PanelController(
+      makeProvider(fullAccess),
+      (message) => posted.push(message),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Promise.reject(new Error("fs")),
+    );
+    await failing.handleMessage({ type: "requestIssueTemplates" });
+    expect(posted).toEqual([{ type: "issueTemplates", templates: [] }]);
+
+    const none = new PanelController(makeProvider(fullAccess), (message) => posted.push(message));
+    await none.handleMessage({ type: "requestIssueTemplates" });
+    expect(posted).toHaveLength(1);
+  });
+});

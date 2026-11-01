@@ -23,6 +23,14 @@ export interface RepositoryOptionView {
  */
 export type UiPrefsView = Readonly<Record<string, unknown>>;
 
+/** An issue template offered in the new-issue form. */
+export interface IssueTemplateView {
+  readonly name: string;
+  readonly body: string;
+  readonly title?: string;
+  readonly labels: readonly string[];
+}
+
 /** Messages the webview sends to the extension host. */
 export type InboundMessage =
   | { readonly type: "requestState"; readonly forceRefresh?: boolean }
@@ -33,7 +41,8 @@ export type InboundMessage =
   | { readonly type: "createMilestone"; readonly input: CreateMilestoneInput }
   | { readonly type: "createBranchForIssue"; readonly id: string }
   | { readonly type: "saveUiPrefs"; readonly prefs: UiPrefsView }
-  | { readonly type: "reconnect" };
+  | { readonly type: "reconnect" }
+  | { readonly type: "requestIssueTemplates" };
 
 /** Messages the extension host sends to the webview. */
 export type OutboundMessage =
@@ -49,6 +58,7 @@ export type OutboundMessage =
       readonly dataFetchedAt?: number;
     }
   | { readonly type: "uiPrefs"; readonly prefs: UiPrefsView }
+  | { readonly type: "issueTemplates"; readonly templates: readonly IssueTemplateView[] }
   | { readonly type: "repositoryOptions"; readonly options: readonly RepositoryOptionView[] }
   | { readonly type: "selectIssue"; readonly id: string }
   | { readonly type: "openNewIssueForm" }

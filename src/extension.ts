@@ -44,6 +44,7 @@ import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { StateSync } from "./state-sync";
+import { parseIssueTemplate, type IssueTemplate } from "./core/templates/issue-template";
 import {
   describeAssignedBadge,
   isPollDue,
@@ -378,6 +379,47 @@ async function connectRepository(
   return resolveAndConnect(providerKind, repository, credentialStore, cacheTtlSeconds, gitlabHost);
 }
 
+/** Workspace-relative places issue templates live, directories first. */
+const TEMPLATE_DIRECTORIES = [".github/ISSUE_TEMPLATE", ".gitlab/issue_templates"] as const;
+const TEMPLATE_FILES = [".github/ISSUE_TEMPLATE.md", ".github/issue_template.md"] as const;
+
+/** Reads Markdown issue templates from the repository's conventional locations. */
+async function readIssueTemplates(folderPath: string | undefined): Promise<IssueTemplate[]> {
+  if (!folderPath) {
+    return [];
+  }
+  const root = vscode.Uri.file(folderPath);
+  const templates: IssueTemplate[] = [];
+  const read = async (uri: vscode.Uri, fileName: string): Promise<void> => {
+    try {
+      const content = Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+      const template = parseIssueTemplate(fileName, content);
+      if (template) {
+        templates.push(template);
+      }
+    } catch {
+      // Unreadable template: skip it rather than failing the whole list.
+    }
+  };
+  for (const directory of TEMPLATE_DIRECTORIES) {
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(vscode.Uri.joinPath(root, directory));
+    } catch {
+      continue;
+    }
+    for (const [name, type] of entries.sort(([a], [b]) => a.localeCompare(b))) {
+      if (type === vscode.FileType.File) {
+        await read(vscode.Uri.joinPath(root, directory, name), name);
+      }
+    }
+  }
+  for (const file of TEMPLATE_FILES) {
+    await read(vscode.Uri.joinPath(root, file), file.split("/").pop() ?? file);
+  }
+  return templates;
+}
+
 /** Builds a fully wired PanelController for a resolved provider/repository. */
 async function buildController(
   context: vscode.ExtensionContext,
@@ -481,6 +523,7 @@ async function buildController(
         void openPanel(context);
       });
     },
+    () => readIssueTemplates(folderPath),
   );
 }
 

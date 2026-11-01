@@ -8,7 +8,7 @@ import type {
 } from "../core/providers/project-provider.interface";
 import { assertCanWrite, hasFetchTimestamps } from "../core/providers/project-provider.interface";
 import { isAuthError } from "../core/auth/is-auth-error";
-import type { InboundMessage, OutboundMessage, UiPrefsView } from "./messages";
+import type { InboundMessage, IssueTemplateView, OutboundMessage, UiPrefsView } from "./messages";
 
 /** Called when an issue update crosses a recognized lifecycle transition. */
 export type IssueTransitionHandler = (issue: IIssue, transition: IssueTransition) => void;
@@ -67,11 +67,20 @@ export class PanelController {
     private readonly onError?: (error: unknown) => void,
     private readonly uiPrefsStore?: UiPrefsStore,
     private readonly onReconnectRequest?: () => void,
+    private readonly loadIssueTemplates?: () => Promise<readonly IssueTemplateView[]>,
   ) {}
 
   async handleMessage(message: InboundMessage): Promise<void> {
     try {
       switch (message.type) {
+        case "requestIssueTemplates":
+          if (this.loadIssueTemplates) {
+            this.postMessage({
+              type: "issueTemplates",
+              templates: await this.loadIssueTemplates().catch(() => []),
+            });
+          }
+          return;
         case "reconnect":
           this.onReconnectRequest?.();
           return;

@@ -523,3 +523,72 @@ kbd {
   background-color: var(--vscode-input-background);
   border: 1px solid var(--vscode-input-border, transparent);
 }
+
+.md-editor {
+  position: relative;
+}
+
+.md-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.md-tab[aria-selected="true"] {
+  font-weight: 600;
+  border-bottom: 2px solid var(--vscode-focusBorder);
+}
+
+.md-preview {
+  min-height: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+
+.md-preview pre {
+  padding: 6px;
+  overflow: auto;
+  background-color: var(--vscode-textCodeBlock-background);
+}
+
+.md-preview code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  background-color: var(--vscode-textCodeBlock-background);
+}
+
+.md-preview blockquote {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--vscode-textBlockQuote-border);
+}
+
+.md-preview li.task {
+  list-style: none;
+}
+
+.md-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 180px;
+  overflow: auto;
+  color: var(--vscode-editorSuggestWidget-foreground, var(--vscode-foreground));
+  background-color: var(--vscode-editorSuggestWidget-background);
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border));
+}
+
+.md-suggestions li {
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.md-suggestions li.active {
+  color: var(--vscode-editorSuggestWidget-selectedForeground, inherit);
+  background-color: var(--vscode-editorSuggestWidget-selectedBackground);
+}

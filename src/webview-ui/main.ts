@@ -7,6 +7,7 @@
 import { hasStateChanged } from "./state-diff.js";
 import { BOARD_COLUMNS, buildBoard, planBoardMove, type BoardColumnId } from "./board-model.js";
 import { describeCacheAge } from "./cache-age.js";
+import { enhanceMarkdownEditor } from "./markdown-editor.js";
 import { moveSelection, shortcutFor, SHORTCUT_HELP } from "./keyboard-shortcuts.js";
 import {
   computeMilestoneProgress,
@@ -32,6 +33,13 @@ import {
   type IssueSort,
   type SavedFilter,
 } from "./issue-view-model.js";
+
+interface IssueTemplateView {
+  name: string;
+  body: string;
+  title?: string;
+  labels: readonly string[];
+}
 
 interface RepositoryOptionView {
   id: string;
@@ -100,6 +108,7 @@ type OutboundMessage =
       dataFetchedAt?: number;
     }
   | { type: "uiPrefs"; prefs: Record<string, unknown> }
+  | { type: "issueTemplates"; templates: IssueTemplateView[] }
   | { type: "repositoryOptions"; options: RepositoryOptionView[] }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
@@ -112,7 +121,7 @@ type InboundMessage =
   | { type: "selectRepository"; id: string }
   | {
       type: "createIssue";
-      input: { title: string; body: string; milestoneId?: string | null };
+      input: { title: string; body: string; milestoneId?: string | null; labels?: string[] };
     }
   | {
       type: "updateIssue";
@@ -132,7 +141,8 @@ type InboundMessage =
     }
   | { type: "createBranchForIssue"; id: string }
   | { type: "saveUiPrefs"; prefs: Record<string, unknown> }
-  | { type: "reconnect" };
+  | { type: "reconnect" }
+  | { type: "requestIssueTemplates" };
 
 declare function acquireVsCodeApi(): {
   postMessage(message: InboundMessage): void;
@@ -157,6 +167,8 @@ let issueFilter: IssueFilter = EMPTY_FILTER;
 let uiPrefs: Record<string, unknown> = {};
 let savedFilters: SavedFilter[] = [];
 let visibleIssueIds: string[] = [];
+let issueTemplates: IssueTemplateView[] = [];
+let templatesRequested = false;
 let issueSort: IssueSort = "default";
 let issueGroup: IssueGroup = "none";
 let milestoneStateFilter: "all" | "open" | "closed" = "all";
@@ -350,6 +362,18 @@ function renderIssueList(): void {
   }
 }
 
+function markdownSources(): {
+  issues: { number: number; title: string }[];
+  users: string[];
+  labels: string[];
+} {
+  return {
+    issues: currentIssues.map(({ number, title }) => ({ number, title })),
+    users: currentAvailableAssignableUsers,
+    labels: currentAvailableLabels,
+  };
+}
+
 function renderNewIssueForm(): void {
   const detail = byId<HTMLDivElement>("issue-detail");
   const milestoneOptions = currentMilestones
@@ -360,6 +384,18 @@ function renderNewIssueForm(): void {
     .join("");
   detail.innerHTML = `
     <h3>New Issue</h3>
+
+    ${
+      issueTemplates.length > 0
+        ? `<label for="new-issue-template">Template</label>
+    <select id="new-issue-template">
+      <option value="">No template</option>
+      ${issueTemplates
+        .map((template, index) => `<option value="${index}">${escapeHtml(template.name)}</option>`)
+        .join("")}
+    </select>`
+        : ""
+    }
 
     <label for="new-issue-title">Title</label>
     <input id="new-issue-title" type="text" />
@@ -377,6 +413,26 @@ function renderNewIssueForm(): void {
     <button id="new-issue-cancel" type="button">Cancel</button>
   `;
 
+  enhanceMarkdownEditor(byId<HTMLTextAreaElement>("new-issue-body"), markdownSources);
+
+  let templateLabels: string[] = [];
+  document.getElementById("new-issue-template")?.addEventListener("change", (event) => {
+    const template = issueTemplates[Number((event.target as HTMLSelectElement).value)];
+    templateLabels = template ? [...template.labels] : [];
+    if (!template) {
+      return;
+    }
+    const titleInput = byId<HTMLInputElement>("new-issue-title");
+    if (!titleInput.value.trim() && template.title) {
+      titleInput.value = template.title;
+    }
+    // Never overwrite what the user already typed: append after it.
+    const bodyInput = byId<HTMLTextAreaElement>("new-issue-body");
+    bodyInput.value = bodyInput.value.trim()
+      ? `${bodyInput.value}\n\n${template.body}`
+      : template.body;
+  });
+
   byId<HTMLButtonElement>("new-issue-cancel").addEventListener("click", () => {
     showNewIssueForm = false;
     renderIssueDetail();
@@ -390,7 +446,15 @@ function renderNewIssueForm(): void {
     }
     const body = byId<HTMLTextAreaElement>("new-issue-body").value;
     const milestoneId = byId<HTMLSelectElement>("new-issue-milestone").value || null;
-    post({ type: "createIssue", input: { title, body, milestoneId } });
+    post({
+      type: "createIssue",
+      input: {
+        title,
+        body,
+        milestoneId,
+        ...(templateLabels.length > 0 ? { labels: templateLabels } : {}),
+      },
+    });
     showNewIssueForm = false;
   });
 }
@@ -489,6 +553,8 @@ function renderIssueDetail(): void {
     <button id="issue-save" ${canWrite ? "" : "disabled"}>Save</button>
     ${canWrite ? "" : '<p class="read-only-note">Your account does not have write access to issues.</p>'}
   `;
+
+  enhanceMarkdownEditor(byId<HTMLTextAreaElement>("issue-body"), markdownSources);
 
   byId<HTMLButtonElement>("issue-create-branch").addEventListener("click", () => {
     post({ type: "createBranchForIssue", id: issue.id });
@@ -1160,6 +1226,10 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
       availableLabels: message.availableLabels,
       availableAssignableUsers: message.availableAssignableUsers,
     };
+    if (!templatesRequested) {
+      templatesRequested = true;
+      post({ type: "requestIssueTemplates" });
+    }
     lastFetchedAt = message.dataFetchedAt;
     updateCacheBanner();
     setRefreshing(false);
@@ -1201,6 +1271,8 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     setIssueFilter({ ...issueFilter, milestone: null });
     setActiveTab("issues");
     renderIssueDetail();
+  } else if (message.type === "issueTemplates") {
+    issueTemplates = message.templates;
   } else if (message.type === "uiPrefs") {
     uiPrefs = { ...message.prefs };
     savedFilters = readSavedFilters(uiPrefs);
