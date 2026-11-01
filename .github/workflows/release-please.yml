@@ -59,7 +59,7 @@ jobs:
       - run: npm ci
 
       - name: Package the extension
-        run: npx vsce package
+        run: npm run package
 
       - name: Attach the package to the GitHub release
         run: gh release upload "$TAG" ./*.vsix --clobber
