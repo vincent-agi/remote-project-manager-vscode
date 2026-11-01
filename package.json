@@ -147,7 +147,8 @@
           "type": "string",
           "enum": [
             "github",
-            "gitlab"
+            "gitlab",
+            "gitea"
           ],
           "default": "github",
           "description": "%configuration.provider.description%"
@@ -161,6 +162,11 @@
           "type": "string",
           "default": "",
           "description": "%configuration.gitlabHost.description%"
+        },
+        "remoteProjectManager.giteaHost": {
+          "type": "string",
+          "default": "",
+          "description": "%configuration.giteaHost.description%"
         },
         "remoteProjectManager.cacheTtlSeconds": {
           "type": "number",

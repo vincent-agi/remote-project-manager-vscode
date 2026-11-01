@@ -241,7 +241,7 @@ async function buildController(
         });
     },
     (error) => {
-      if (providerKind !== "gitlab" || !isAuthError(error) || reconnecting) {
+      if (providerKind === "github" || !isAuthError(error) || reconnecting) {
         return;
       }
       reconnecting = true;

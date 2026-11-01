@@ -31,6 +31,16 @@ describe("buildPermalink", () => {
   });
 });
 
+describe("buildPermalink for Gitea", () => {
+  it("links to the commit's source view with line anchors", () => {
+    const gitea = { ...location, providerKind: "gitea" as const, giteaHost: "git.example.com" };
+    expect(buildPermalink(gitea)).toBe(
+      "https://git.example.com/o/r/src/commit/abc123/src/my%20dir/a.ts#L10",
+    );
+    expect(buildPermalink({ ...gitea, endLine: 14 })).toMatch(/#L10-L14$/);
+  });
+});
+
 describe("buildIssueDraft", () => {
   const input = {
     title: "  Handle empty list ",

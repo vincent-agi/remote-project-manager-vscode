@@ -1,5 +1,5 @@
 /** Remote platform an issue or milestone belongs to. */
-export type ProviderKind = "github" | "gitlab";
+export type ProviderKind = "github" | "gitlab" | "gitea";
 
 /** Lifecycle state of an issue, normalized across providers. */
 export type IssueState = "open" | "closed";

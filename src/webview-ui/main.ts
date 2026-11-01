@@ -85,7 +85,7 @@ interface IssueTemplateView {
 interface RepositoryOptionView {
   id: string;
   label: string;
-  provider: "github" | "gitlab";
+  provider: "github" | "gitlab" | "gitea";
   repository: string;
 }
 

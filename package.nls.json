@@ -1,6 +1,6 @@
 {
   "displayName": "Remote Project Manager",
-  "description": "View and manage GitHub and GitLab Issues and Milestones from a central panel in VS Code.",
+  "description": "View and manage GitHub, GitLab and Gitea Issues and Milestones from a central panel in VS Code.",
   "command.openPanel.title": "Remote Project Manager: Open Panel",
   "command.signOutGitLab.title": "Remote Project Manager: Sign Out of GitLab",
   "command.newIssue.title": "Remote Project Manager: New Issue",
@@ -26,7 +26,7 @@
   "view.sidebar.name": "Remote Project Manager",
   "viewsWelcome.sidebar.contents": "Manage GitHub and GitLab Issues and Milestones from a central panel.\n[Open Panel](command:remoteProjectManager.openPanel)\n[Get Started](command:remoteProjectManager.openWalkthrough)",
   "configuration.title": "Remote Project Manager",
-  "configuration.provider.description": "Remote platform to connect to.",
+  "configuration.provider.description": "Remote platform to connect to (github, gitlab or gitea).",
   "configuration.repository.description": "Fallback repository or project path, e.g. 'owner/repo'. Only used when no workspace folder has a recognized git 'origin' remote; the detected remote always wins.",
   "configuration.gitlabHost.description": "Hostname of a self-hosted GitLab instance (e.g. 'gitlab.example.com'), used both to auto-detect repositories on that host and to connect to its API. Leave empty to use gitlab.com.",
   "configuration.cacheTtlSeconds.description": "How long issue/milestone/capability reads are cached before refetching, in seconds. Use the panel's Refresh button to bypass the cache immediately.",
@@ -50,5 +50,6 @@
   "walkthrough.step.commit.description": "Compose a Conventional Commit with a Gitmoji and an issue reference.\n[Compose Commit](command:remoteProjectManager.composeCommit)",
   "configuration.aiContextFiles.description": "Workspace-relative files 'Export Milestone Context for AI Agents' writes to, e.g. '.github/copilot-instructions.md', 'CLAUDE.md', 'AGENTS.md', '.cursorrules'. When set, it replaces 'aiContextFile'. Each file only has its extension-managed section replaced.",
   "configuration.aiContextAutoUpdate.description": "Rewrite the exported AI context files automatically when the issues of the last exported milestone change. Only files whose content changed are written.",
-  "command.selectRepository.title": "Remote Project Manager: Select Repository"
+  "command.selectRepository.title": "Remote Project Manager: Select Repository",
+  "configuration.giteaHost.description": "Hostname of a Gitea or Forgejo instance (e.g. 'git.example.com', or 'https://git.example.com:3000' for a custom scheme or port), used both to auto-detect repositories on that host and to connect to its API. Required to use Gitea."
 }
