@@ -166,6 +166,7 @@ Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kb
 | `remoteProjectManager.syncMarkInProgressOnCommit` | `boolean`              | `true`                              | Add the `in-progress` label to your assigned issue after your first commit on its branch.                                                                                          |
 | `remoteProjectManager.syncRemindMissingIssue`     | `boolean`              | `true`                              | Remind you once per branch when you commit on a branch that references no issue.                                                                                                   |
 | `remoteProjectManager.syncProposeCloseOnMerge`    | `boolean`              | `true`                              | Offer to close an open issue already closed by a `Fixes/Closes/Resolves #N` commit on the default branch.                                                                          |
+| `remoteProjectManager.todoCodeLens`               | `boolean`              | `true`                              | Show a CodeLens and link on `TODO`/`FIXME` comments (linked issue, or "Create issue from TODO").                                                                                   |
 
 ## 4. Lessons learned
 
