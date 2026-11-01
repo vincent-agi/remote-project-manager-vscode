@@ -35,6 +35,7 @@ import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { StateSync } from "./state-sync";
+import { registerEditorIntegration } from "./editor-integration";
 import { logger } from "./logger";
 import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
 import type { SyncState } from "./core/status/status-bar-model";
@@ -1775,6 +1776,12 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
   const statusBar = new IssueStatusBar();
   logger.info("Remote Project Manager activated");
+  const editorIntegration = registerEditorIntegration(context, {
+    getEstablishedConnection: () => treeDataProvider.getEstablishedConnection(),
+    getActiveConnection: () => getActiveConnection(context),
+    resolveRepository,
+    refreshTree: () => treeDataProvider.refresh(),
+  });
   const stateSync = new StateSync(
     context,
     () => treeDataProvider.getEstablishedConnection(),
@@ -1787,6 +1794,7 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     treeDataProvider.onDidSync(({ sync, folderPath }) => {
       statusBar.update(sync, folderPath);
       if (sync.kind === "ok") {
+        editorIntegration.refresh();
         stateSync.onSynced(folderPath);
       }
     }),

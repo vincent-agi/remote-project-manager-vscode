@@ -112,6 +112,14 @@ export class SimpleGitService implements IGitService {
     return branch.trim();
   }
 
+  async getHeadSha(cwd: string): Promise<string> {
+    return (await simpleGit(cwd).raw(["rev-parse", "HEAD"])).trim();
+  }
+
+  async getRepoRoot(cwd: string): Promise<string> {
+    return (await simpleGit(cwd).raw(["rev-parse", "--show-toplevel"])).trim();
+  }
+
   async getLastReflogSubject(cwd: string): Promise<string> {
     const raw = await simpleGit(cwd).raw(["reflog", "-1", "--format=%gs"]);
     return raw.trim();

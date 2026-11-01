@@ -56,6 +56,12 @@ export interface IGitService {
    */
   log(cwd: string, range?: string, maxCount?: number): Promise<GitLogEntry[]>;
 
+  /** Full SHA of the commit `HEAD` points to. */
+  getHeadSha(cwd: string): Promise<string>;
+
+  /** Absolute path of the repository's top-level directory. */
+  getRepoRoot(cwd: string): Promise<string>;
+
   /** Subject of the latest reflog entry for HEAD (e.g. `"commit: feat: ..."`, `"checkout: moving ..."`). */
   getLastReflogSubject(cwd: string): Promise<string>;
 }

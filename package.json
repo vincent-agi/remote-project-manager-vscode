@@ -94,6 +94,18 @@
       {
         "command": "remoteProjectManager.uninstallCommitMsgHook",
         "title": "Remote Project Manager: Uninstall Commit Message Hook"
+      },
+      {
+        "command": "remoteProjectManager.createIssueFromSelection",
+        "title": "Remote Project Manager: Create Issue from Selection"
+      },
+      {
+        "command": "remoteProjectManager.createIssueFromTodo",
+        "title": "Remote Project Manager: Create Issue from TODO"
+      },
+      {
+        "command": "remoteProjectManager.openIssueByNumber",
+        "title": "Remote Project Manager: Open Issue by Number"
       }
     ],
     "viewsContainers": {
@@ -176,6 +188,11 @@
           "type": "boolean",
           "default": true,
           "description": "Offer to close an open issue assigned to you when a commit on the default branch already closes it (Fixes/Closes/Resolves #N)."
+        },
+        "remoteProjectManager.todoCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a CodeLens and clickable link on TODO/FIXME comments: the linked issue (TODO #12), or 'Create issue from TODO'."
         }
       }
     },
@@ -230,6 +247,18 @@
         {
           "command": "remoteProjectManager.openIssueInBrowser",
           "when": "false"
+        },
+        {
+          "command": "remoteProjectManager.createIssueFromTodo",
+          "when": "false"
+        },
+        {
+          "command": "remoteProjectManager.openIssueByNumber",
+          "when": "false"
+        },
+        {
+          "command": "remoteProjectManager.createIssueFromSelection",
+          "when": "editorHasSelection"
         }
       ],
       "scm/title": [
@@ -237,6 +266,13 @@
           "command": "remoteProjectManager.composeCommit",
           "when": "scmProvider == git",
           "group": "navigation@10"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "remoteProjectManager.createIssueFromSelection",
+          "when": "editorHasSelection",
+          "group": "9_remoteProjectManager@1"
         }
       ]
     },
