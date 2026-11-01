@@ -44,6 +44,13 @@ import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { StateSync } from "./state-sync";
+import {
+  AiContextSync,
+  readAiContextTargets,
+  trackExportedContext,
+  writeContextFiles,
+} from "./ai-context-files";
+import { digestContext } from "./core/ai/context-targets";
 import { describeBranchPatternWarning, previewBranchPattern } from "./core/settings/branch-pattern";
 import {
   buildSettingEntries,
@@ -73,8 +80,6 @@ import { lintCommits } from "./core/git/lint-commits";
 import { buildConventionalPrTitle, buildPrBody, type CommitRef } from "./core/git/pr-body";
 import { formatIssueContext } from "./core/ai/issue-context";
 import { formatMilestoneContext } from "./core/ai/milestone-context";
-import { replaceManagedSection } from "./core/ai/managed-section";
-import { resolveSafeRelativeSegments } from "./core/workspace/safe-relative-path";
 import type { IMilestone } from "./core/models/milestone.model";
 
 /** `workspaceState` key holding the panel's UI preferences (saved filters, sort order, ...). */
@@ -1794,37 +1799,29 @@ async function exportMilestoneContext(context: vscode.ExtensionContext): Promise
   );
   const block = formatMilestoneContext(resolvedMilestone, milestoneIssues);
 
-  const config = vscode.workspace.getConfiguration("remoteProjectManager");
-  const relativePath =
-    config.get<string>("aiContextFile", ".github/copilot-instructions.md") ||
-    ".github/copilot-instructions.md";
-  const safeSegments = resolveSafeRelativeSegments(relativePath);
-  if (!safeSegments) {
+  const { targets, rejected } = readAiContextTargets();
+  for (const path of rejected) {
     void vscode.window.showErrorMessage(
       vscode.l10n.t(
         "'remoteProjectManager.aiContextFile' (\"{0}\") escapes the workspace folder and was rejected.",
-        relativePath,
+        path,
       ),
     );
+  }
+  if (targets.length === 0) {
     return;
   }
-  const fileUri = vscode.Uri.joinPath(vscode.Uri.file(cwd), ...safeSegments);
-
-  let existing = "";
-  try {
-    const bytes = await vscode.workspace.fs.readFile(fileUri);
-    existing = Buffer.from(bytes).toString("utf8");
-  } catch {
-    // File doesn't exist yet — start from empty.
-  }
-
-  const updated = replaceManagedSection(existing, "milestone-context", block);
-
-  await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(fileUri, ".."));
-  await vscode.workspace.fs.writeFile(fileUri, Buffer.from(updated, "utf8"));
+  await writeContextFiles(cwd, block, targets);
+  await trackExportedContext(context, {
+    milestoneId: resolvedMilestone.id,
+    digest: digestContext(block),
+  });
 
   void vscode.window.showInformationMessage(
-    vscode.l10n.t("Exported milestone context to {0}.", relativePath),
+    vscode.l10n.t(
+      "Exported milestone context to {0}.",
+      targets.map((target) => target.displayPath).join(", "),
+    ),
   );
 }
 
@@ -2076,6 +2073,10 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
   const treeView = vscode.window.createTreeView("remoteProjectManager.sidebar", {
     treeDataProvider,
   });
+  const aiContextSync = new AiContextSync(
+    context,
+    () => treeDataProvider.getEstablishedConnection()?.provider,
+  );
   const stateSync = new StateSync(
     context,
     () => treeDataProvider.getEstablishedConnection(),
@@ -2090,6 +2091,7 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
       if (sync.kind === "ok") {
         editorIntegration.refresh();
         stateSync.onSynced(folderPath);
+        void aiContextSync.onSynced(folderPath);
       }
     }),
   );

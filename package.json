@@ -203,6 +203,27 @@
           "default": 300,
           "minimum": 0,
           "description": "%configuration.autoRefreshSeconds.description%"
+        },
+        "remoteProjectManager.aiContextFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "examples": [
+            [
+              ".github/copilot-instructions.md",
+              "CLAUDE.md",
+              "AGENTS.md",
+              ".cursorrules"
+            ]
+          ],
+          "description": "%configuration.aiContextFiles.description%"
+        },
+        "remoteProjectManager.aiContextAutoUpdate": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.aiContextAutoUpdate.description%"
         }
       }
     },

@@ -206,5 +206,10 @@
   "owner/repo, used when no git remote is recognized.": "owner/repo, utilisé quand aucun remote git n'est reconnu.",
   "Could not save the setting: {0}": "Impossible d'enregistrer le paramètre : {0}",
   "Unknown setting.": "Paramètre inconnu.",
-  "Settings": "Paramètres"
+  "Settings": "Paramètres",
+  "AI context files": "Fichiers de contexte IA",
+  "One per line, e.g. CLAUDE.md, AGENTS.md, .cursorrules. Replaces the single file above.": "Un par ligne, par ex. CLAUDE.md, AGENTS.md, .cursorrules. Remplace le fichier unique ci-dessus.",
+  "Keep the AI context files up to date": "Garder les fichiers de contexte IA à jour",
+  "Rewrites them when the issues of the last exported milestone change.": "Les réécrit quand les issues du dernier jalon exporté changent.",
+  "Expected a list of text lines.": "Une liste de lignes de texte est attendue."
 }

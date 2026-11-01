@@ -6,6 +6,7 @@ export type SettingKind =
   | { readonly type: "boolean" }
   | { readonly type: "number"; readonly min: number }
   | { readonly type: "string" }
+  | { readonly type: "list" }
   | { readonly type: "enum"; readonly values: readonly string[] };
 
 /**
@@ -51,6 +52,8 @@ export const SETTING_DESCRIPTORS: readonly SettingDescriptor[] = [
   { key: "syncRemindMissingIssue", group: "automation", kind: { type: "boolean" }, scope: "user" },
   { key: "syncProposeCloseOnMerge", group: "automation", kind: { type: "boolean" }, scope: "user" },
   { key: "aiContextFile", group: "ai", kind: { type: "string" }, scope: "workspace" },
+  { key: "aiContextFiles", group: "ai", kind: { type: "list" }, scope: "workspace" },
+  { key: "aiContextAutoUpdate", group: "ai", kind: { type: "boolean" }, scope: "workspace" },
   { key: "todoCodeLens", group: "editor", kind: { type: "boolean" }, scope: "user" },
 ];
 
@@ -130,6 +133,18 @@ export function describeSetting(
         label: t("AI context file"),
         hint: t("Workspace-relative file the milestone context is exported to."),
       };
+    case "aiContextFiles":
+      return {
+        label: t("AI context files"),
+        hint: t(
+          "One per line, e.g. CLAUDE.md, AGENTS.md, .cursorrules. Replaces the single file above.",
+        ),
+      };
+    case "aiContextAutoUpdate":
+      return {
+        label: t("Keep the AI context files up to date"),
+        hint: t("Rewrites them when the issues of the last exported milestone change."),
+      };
     case "todoCodeLens":
       return {
         label: t("CodeLens on TODO/FIXME comments"),
@@ -167,6 +182,13 @@ export function validateSettingValue(
       return typeof value === "string"
         ? { ok: true, value: value.trim() }
         : { ok: false, reason: t("Expected text.") };
+    case "list": {
+      if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
+        return { ok: false, reason: t("Expected a list of text lines.") };
+      }
+      const cleaned = value.map((entry) => entry.trim()).filter((entry) => entry !== "");
+      return { ok: true, value: cleaned };
+    }
     case "enum":
       return typeof value === "string" && kind.values.includes(value)
         ? { ok: true, value }

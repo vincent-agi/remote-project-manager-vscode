@@ -51,6 +51,7 @@ type SettingKindView =
   | { type: "boolean" }
   | { type: "number"; min: number }
   | { type: "string" }
+  | { type: "list" }
   | { type: "enum"; values: string[] };
 
 interface SettingEntryView {
@@ -1161,6 +1162,12 @@ function renderSettingControl(entry: SettingEntryView): string {
             `<option value="${escapeAttr(option)}" ${entry.value === option ? "selected" : ""}>${escapeHtml(option)}</option>`,
         )
         .join("")}</select>`;
+    case "list":
+      return `<textarea id="${id}" rows="4" ${labelledBy}>${escapeHtml(
+        Array.isArray(entry.value)
+          ? entry.value.filter((line) => typeof line === "string").join("\n")
+          : "",
+      )}</textarea>`;
     case "string":
       return `<input id="${id}" type="text" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
   }
@@ -1202,6 +1209,8 @@ function renderSettings(): void {
       let value: unknown;
       if (entry.kind.type === "boolean") {
         value = (control as HTMLInputElement).checked;
+      } else if (entry.kind.type === "list") {
+        value = control.value.split("\n");
       } else if (entry.kind.type === "number") {
         value = control.value.trim() === "" ? Number.NaN : Number(control.value);
       } else {

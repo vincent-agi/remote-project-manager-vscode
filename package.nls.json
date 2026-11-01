@@ -47,5 +47,7 @@
   "walkthrough.step.issue.title": "Create your first issue",
   "walkthrough.step.issue.description": "Write the issue with the Markdown editor, labels and a milestone.\n[New Issue](command:remoteProjectManager.newIssue)",
   "walkthrough.step.commit.title": "Make a first commit",
-  "walkthrough.step.commit.description": "Compose a Conventional Commit with a Gitmoji and an issue reference.\n[Compose Commit](command:remoteProjectManager.composeCommit)"
+  "walkthrough.step.commit.description": "Compose a Conventional Commit with a Gitmoji and an issue reference.\n[Compose Commit](command:remoteProjectManager.composeCommit)",
+  "configuration.aiContextFiles.description": "Workspace-relative files 'Export Milestone Context for AI Agents' writes to, e.g. '.github/copilot-instructions.md', 'CLAUDE.md', 'AGENTS.md', '.cursorrules'. When set, it replaces 'aiContextFile'. Each file only has its extension-managed section replaced.",
+  "configuration.aiContextAutoUpdate.description": "Rewrite the exported AI context files automatically when the issues of the last exported milestone change. Only files whose content changed are written."
 }

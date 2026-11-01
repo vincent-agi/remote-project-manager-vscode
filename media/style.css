@@ -778,7 +778,8 @@ kbd {
 
 .setting-row input[type="text"],
 .setting-row input[type="number"],
-.setting-row select {
+.setting-row select,
+.setting-row textarea {
   grid-column: 1;
   box-sizing: border-box;
   width: 100%;

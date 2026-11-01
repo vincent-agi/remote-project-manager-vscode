@@ -47,5 +47,7 @@
   "walkthrough.step.issue.title": "Créez votre première issue",
   "walkthrough.step.issue.description": "Rédigez l'issue avec l'éditeur Markdown, des labels et un jalon.\n[Nouvelle issue](command:remoteProjectManager.newIssue)",
   "walkthrough.step.commit.title": "Faites un premier commit",
-  "walkthrough.step.commit.description": "Composez un Conventional Commit avec un Gitmoji et une référence d'issue.\n[Composer un commit](command:remoteProjectManager.composeCommit)"
+  "walkthrough.step.commit.description": "Composez un Conventional Commit avec un Gitmoji et une référence d'issue.\n[Composer un commit](command:remoteProjectManager.composeCommit)",
+  "configuration.aiContextFiles.description": "Fichiers, relatifs à l'espace de travail, où écrit « Exporter le contexte du jalon pour les agents IA », par ex. '.github/copilot-instructions.md', 'CLAUDE.md', 'AGENTS.md', '.cursorrules'. Quand il est renseigné, il remplace 'aiContextFile'. Seule la section gérée par l'extension de chaque fichier est remplacée.",
+  "configuration.aiContextAutoUpdate.description": "Réécrit automatiquement les fichiers de contexte IA exportés quand les issues du dernier jalon exporté changent. Seuls les fichiers dont le contenu a changé sont écrits."
 }
