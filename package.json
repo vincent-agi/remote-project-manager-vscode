@@ -204,7 +204,29 @@
           "when": "false"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "remoteProjectManager.composeCommit",
+        "key": "ctrl+alt+r c",
+        "mac": "cmd+alt+r c"
+      },
+      {
+        "command": "remoteProjectManager.pickGitmoji",
+        "key": "ctrl+alt+r g",
+        "mac": "cmd+alt+r g"
+      },
+      {
+        "command": "remoteProjectManager.newIssue",
+        "key": "ctrl+alt+r n",
+        "mac": "cmd+alt+r n"
+      },
+      {
+        "command": "remoteProjectManager.refresh",
+        "key": "ctrl+alt+r r",
+        "mac": "cmd+alt+r r"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p . && tsc -p tsconfig.webview.json",
