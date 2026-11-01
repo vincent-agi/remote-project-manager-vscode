@@ -35,6 +35,34 @@ describe("chooseRepository", () => {
     expect(result.kind).toBe("candidates");
   });
 
+  it("honours the remembered choice among several folders, keeping the alternatives", () => {
+    const a = candidate("a/a");
+    const b = candidate("b/b");
+    expect(chooseRepository([a, b], { ...settings, preferredFolderPath: b.folderPath })).toEqual({
+      kind: "resolved",
+      providerKind: "github",
+      repository: "b/b",
+      folderPath: b.folderPath,
+      alternatives: [a, b],
+    });
+  });
+
+  it("ignores a remembered choice that is no longer a candidate", () => {
+    const result = chooseRepository([candidate("a/a"), candidate("b/b")], {
+      ...settings,
+      preferredFolderPath: "/gone",
+    });
+    expect(result.kind).toBe("candidates");
+  });
+
+  it("does not add alternatives for a single repository", () => {
+    const result = chooseRepository([candidate("a/a")], {
+      ...settings,
+      preferredFolderPath: "/ws/a/a",
+    });
+    expect(result).not.toHaveProperty("alternatives");
+  });
+
   it("falls back to the setting when nothing is detected", () => {
     expect(chooseRepository([], settings)).toEqual({
       kind: "resolved",

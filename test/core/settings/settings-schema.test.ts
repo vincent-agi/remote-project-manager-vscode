@@ -32,6 +32,17 @@ describe("validateSettingValue", () => {
     expect(validateSettingValue(descriptor("repository"), 3).ok).toBe(false);
   });
 
+  it("cleans lists of text and rejects anything else", () => {
+    expect(
+      validateSettingValue(descriptor("aiContextFiles"), [" CLAUDE.md ", "", "AGENTS.md"]),
+    ).toEqual({
+      ok: true,
+      value: ["CLAUDE.md", "AGENTS.md"],
+    });
+    expect(validateSettingValue(descriptor("aiContextFiles"), "CLAUDE.md").ok).toBe(false);
+    expect(validateSettingValue(descriptor("aiContextFiles"), ["a", 1]).ok).toBe(false);
+  });
+
   it("only accepts listed enum values", () => {
     expect(validateSettingValue(descriptor("provider"), "gitlab").ok).toBe(true);
     expect(validateSettingValue(descriptor("provider"), "bitbucket")).toEqual({
@@ -62,9 +73,11 @@ describe("SETTING_DESCRIPTORS", () => {
   it("matches the manifest's types", () => {
     for (const { key, kind } of SETTING_DESCRIPTORS) {
       const manifestType = properties[`remoteProjectManager.${key}`].type;
-      expect(manifestType === "string" ? ["string", "enum"] : [manifestType], key).toContain(
-        kind.type,
-      );
+      const accepted: Record<string, string[]> = {
+        string: ["string", "enum"],
+        array: ["list"],
+      };
+      expect(accepted[manifestType] ?? [manifestType], key).toContain(kind.type);
     }
   });
 });

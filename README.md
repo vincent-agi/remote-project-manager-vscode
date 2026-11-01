@@ -149,6 +149,10 @@ New to the extension? Run **Remote Project Manager: Open Walkthrough** (or click
 
 The extension follows VS Code's display language: English and French are provided (manifest, notifications, panel and Git Graph). To add a language, add `package.nls.<lang>.json` and `l10n/bundle.l10n.<lang>.json` next to the French ones, plus a table like the one in `src/webview-ui/translations.ts`; tests fail if a message is left untranslated or a placeholder is lost. The walkthrough pages in `media/walkthrough` are English only.
 
+### Several repositories in one workspace
+
+With several workspace folders on different repositories, the first time you open the panel you pick one. The choice is remembered per workspace and followed by the sidebar, the status bar and every command. Switch at any time from the drop-down in the panel, the sidebar's title bar, or **Remote Project Manager: Select Repository**.
+
 ### Keyboard Shortcuts
 
 Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kbd>+<kbd>⌥</kbd>+<kbd>R</kbd> instead of <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd>, followed by the second key:
@@ -171,6 +175,8 @@ Default chords (rebindable in **Keyboard Shortcuts**). On macOS use <kbd>⌘</kb
 | `remoteProjectManager.autoBranchOnInProgress`     | `boolean`              | `true`                              | Automatically create and check out a git branch when an issue assigned to you moves to "in progress." When off, a suggested branch name is shown instead.                          |
 | `remoteProjectManager.branchNamePattern`          | `string`               | `"${type}/${issue_id}-${slug}"`     | Pattern for auto-created branch names. Placeholders: `${type}` (inferred from labels), `${issue_id}` (issue number), `${slug}` (sanitized title).                                  |
 | `remoteProjectManager.aiContextFile`              | `string`               | `".github/copilot-instructions.md"` | Workspace-relative path **Export Milestone Context for AI Agents** writes to. Only the extension-managed section is replaced on re-export; the rest of the file is left untouched. |
+| `remoteProjectManager.aiContextFiles`             | `string[]`             | `[]`                                | Several files to export the milestone context to (e.g. `CLAUDE.md`, `AGENTS.md`, `.cursorrules`); replaces `aiContextFile` when set.                                               |
+| `remoteProjectManager.aiContextAutoUpdate`        | `boolean`              | `false`                             | Rewrite the exported files automatically when the issues of the last exported milestone change.                                                                                    |
 | `remoteProjectManager.syncMarkInProgressOnCommit` | `boolean`              | `true`                              | Add the `in-progress` label to your assigned issue after your first commit on its branch.                                                                                          |
 | `remoteProjectManager.syncRemindMissingIssue`     | `boolean`              | `true`                              | Remind you once per branch when you commit on a branch that references no issue.                                                                                                   |
 | `remoteProjectManager.syncProposeCloseOnMerge`    | `boolean`              | `true`                              | Offer to close an open issue already closed by a `Fixes/Closes/Resolves #N` commit on the default branch.                                                                          |

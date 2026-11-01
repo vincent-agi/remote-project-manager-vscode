@@ -84,7 +84,12 @@ export type OutboundMessage =
     }
   | { readonly type: "comments"; readonly issueId: string; readonly comments: readonly IComment[] }
   | { readonly type: "issueTemplates"; readonly templates: readonly IssueTemplateView[] }
-  | { readonly type: "repositoryOptions"; readonly options: readonly RepositoryOptionView[] }
+  | {
+      readonly type: "repositoryOptions";
+      readonly options: readonly RepositoryOptionView[];
+      /** Set when a repository is already chosen: the webview shows a switcher instead of the picker. */
+      readonly selectedId?: string;
+    }
   | { readonly type: "selectIssue"; readonly id: string }
   | { readonly type: "openNewIssueForm" }
   | { readonly type: "openNewMilestoneForm" }

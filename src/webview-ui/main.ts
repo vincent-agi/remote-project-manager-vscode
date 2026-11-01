@@ -51,6 +51,7 @@ type SettingKindView =
   | { type: "boolean" }
   | { type: "number"; min: number }
   | { type: "string" }
+  | { type: "list" }
   | { type: "enum"; values: string[] };
 
 interface SettingEntryView {
@@ -154,7 +155,7 @@ type OutboundMessage =
   | { type: "comments"; issueId: string; comments: CommentView[] }
   | { type: "settings"; entries: SettingEntryView[] }
   | { type: "branchNamePreview"; pattern: string; example: string; warnings: string[] }
-  | { type: "repositoryOptions"; options: RepositoryOptionView[] }
+  | { type: "repositoryOptions"; options: RepositoryOptionView[]; selectedId?: string }
   | { type: "selectIssue"; id: string }
   | { type: "openNewIssueForm" }
   | { type: "openNewMilestoneForm" }
@@ -1028,6 +1029,22 @@ function renderRepositoryPicker(options: RepositoryOptionView[]): void {
   }
 }
 
+/** A persistent drop-down to switch repository once one is chosen and the workspace has several. */
+function renderRepositorySwitcher(options: RepositoryOptionView[], selectedId: string): void {
+  const select = byId<HTMLSelectElement>("repository-switcher");
+  select.innerHTML = options
+    .map(
+      (option) =>
+        `<option value="${escapeAttr(option.id)}" ${option.id === selectedId ? "selected" : ""}>${escapeHtml(option.label)}</option>`,
+    )
+    .join("");
+  select.hidden = options.length < 2;
+}
+
+byId<HTMLSelectElement>("repository-switcher").addEventListener("change", (event) => {
+  post({ type: "selectRepository", id: (event.target as HTMLSelectElement).value });
+});
+
 function renderIssueLabelFilterOptions(): void {
   const select = byId<HTMLSelectElement>("issue-label-filter");
   const previousValue = select.value;
@@ -1161,6 +1178,12 @@ function renderSettingControl(entry: SettingEntryView): string {
             `<option value="${escapeAttr(option)}" ${entry.value === option ? "selected" : ""}>${escapeHtml(option)}</option>`,
         )
         .join("")}</select>`;
+    case "list":
+      return `<textarea id="${id}" rows="4" ${labelledBy}>${escapeHtml(
+        Array.isArray(entry.value)
+          ? entry.value.filter((line) => typeof line === "string").join("\n")
+          : "",
+      )}</textarea>`;
     case "string":
       return `<input id="${id}" type="text" value="${escapeAttr(settingText(entry.value))}" ${labelledBy} />`;
   }
@@ -1202,6 +1225,8 @@ function renderSettings(): void {
       let value: unknown;
       if (entry.kind.type === "boolean") {
         value = (control as HTMLInputElement).checked;
+      } else if (entry.kind.type === "list") {
+        value = control.value.split("\n");
       } else if (entry.kind.type === "number") {
         value = control.value.trim() === "" ? Number.NaN : Number(control.value);
       } else {
@@ -1618,7 +1643,11 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     }
   } else if (message.type === "repositoryOptions") {
     clearError();
-    renderRepositoryPicker(message.options);
+    if (message.selectedId === undefined) {
+      renderRepositoryPicker(message.options);
+    } else {
+      renderRepositorySwitcher(message.options, message.selectedId);
+    }
   } else if (message.type === "selectIssue") {
     selectedIssueId = message.id;
     showNewIssueForm = false;

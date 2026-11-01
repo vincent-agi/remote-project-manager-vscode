@@ -110,6 +110,11 @@
       {
         "command": "remoteProjectManager.openWalkthrough",
         "title": "%command.openWalkthrough.title%"
+      },
+      {
+        "command": "remoteProjectManager.selectRepository",
+        "title": "%command.selectRepository.title%",
+        "icon": "$(repo)"
       }
     ],
     "viewsContainers": {
@@ -203,6 +208,27 @@
           "default": 300,
           "minimum": 0,
           "description": "%configuration.autoRefreshSeconds.description%"
+        },
+        "remoteProjectManager.aiContextFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "examples": [
+            [
+              ".github/copilot-instructions.md",
+              "CLAUDE.md",
+              "AGENTS.md",
+              ".cursorrules"
+            ]
+          ],
+          "description": "%configuration.aiContextFiles.description%"
+        },
+        "remoteProjectManager.aiContextAutoUpdate": {
+          "type": "boolean",
+          "default": false,
+          "description": "%configuration.aiContextAutoUpdate.description%"
         }
       }
     },
@@ -283,6 +309,13 @@
           "command": "remoteProjectManager.createIssueFromSelection",
           "when": "editorHasSelection",
           "group": "9_remoteProjectManager@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "remoteProjectManager.selectRepository",
+          "when": "view == remoteProjectManager.sidebar && remoteProjectManager.multiRepo",
+          "group": "navigation"
         }
       ]
     },
