@@ -31,6 +31,7 @@ import type { InboundMessage, RepositoryOptionView } from "./webview/messages";
 import { getWebviewHtml } from "./webview/webview-html";
 import { extractIssueNumberFromBranch } from "./core/git/branch-issue-ref";
 import { buildCommitMsgHookScript, classifyExistingHook } from "./core/git/commit-msg-hook";
+import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { logger } from "./logger";
@@ -45,7 +46,7 @@ import {
 import { parseGitmojis, type Gitmoji } from "./core/git/gitmoji";
 import { groupCommitsByIssue } from "./core/git/graph";
 import { lintCommits } from "./core/git/lint-commits";
-import { buildPrBody, buildPrTitle, type CommitRef } from "./core/git/pr-body";
+import { buildConventionalPrTitle, buildPrBody, type CommitRef } from "./core/git/pr-body";
 import { formatIssueContext } from "./core/ai/issue-context";
 import { formatMilestoneContext } from "./core/ai/milestone-context";
 import { replaceManagedSection } from "./core/ai/managed-section";
@@ -1248,28 +1249,30 @@ async function copyIssueContext(
   void vscode.window.showInformationMessage(`Copied issue #${issue.number} context to clipboard.`);
 }
 
-/** Builds a prefilled GitHub compare or GitLab merge-request URL (fallback when direct PR creation isn't wired up). */
-function buildCompareUrl(
-  providerKind: ProviderKind,
-  repository: string,
-  baseBranch: string,
-  headBranch: string,
+/**
+ * Multi-select QuickPick over a provider-supplied list, with `preselected`
+ * entries ticked. Best-effort: a failing or empty list yields `[]` rather
+ * than blocking the flow; cancelling the picker also yields `[]`.
+ */
+async function pickMany(
   title: string,
-  body: string,
-  gitlabHost: string | undefined,
-): string {
-  if (providerKind === "github") {
-    const params = new URLSearchParams({ quick_pull: "1", title, body });
-    return `https://github.com/${repository}/compare/${encodeURIComponent(baseBranch)}...${encodeURIComponent(headBranch)}?${params.toString()}`;
+  load: () => Promise<readonly string[]>,
+  preselected: readonly string[],
+): Promise<string[]> {
+  let options: readonly string[];
+  try {
+    options = await load();
+  } catch {
+    return [];
   }
-  const host = gitlabHost || "gitlab.com";
-  const params = new URLSearchParams({
-    "merge_request[source_branch]": headBranch,
-    "merge_request[target_branch]": baseBranch,
-    "merge_request[title]": title,
-    "merge_request[description]": body,
-  });
-  return `https://${host}/${repository}/-/merge_requests/new?${params.toString()}`;
+  if (options.length === 0) {
+    return [];
+  }
+  const picked = await vscode.window.showQuickPick(
+    options.map((option) => ({ label: option, picked: preselected.includes(option) })),
+    { title, canPickMany: true },
+  );
+  return picked?.map((item) => item.label) ?? [];
 }
 
 /** Generates a PR/MR pre-filled from the active issue, its commits, and its milestone (#58). */
@@ -1323,7 +1326,7 @@ async function createPrFromIssue(
     }
   }
 
-  const title = buildPrTitle(issue);
+  const suggestedTitle = buildConventionalPrTitle(issue, commits);
   const body = buildPrBody(issue, milestone, commits);
 
   const resolution = await resolveRepository();
@@ -1335,18 +1338,55 @@ async function createPrFromIssue(
     return;
   }
 
+  const title = await vscode.window.showInputBox({
+    title: "Pull request title",
+    prompt: "Generated from the branch's commits (Conventional Commits). Edit if needed.",
+    value: suggestedTitle,
+    validateInput: (value) => (value.trim() ? undefined : "Title is required."),
+  });
+  if (title === undefined) {
+    return;
+  }
+
+  const stateChoice = await vscode.window.showQuickPick(
+    [
+      { label: "Ready for review", draft: false },
+      { label: "Draft", description: "Not ready to be merged yet", draft: true },
+    ],
+    { title: "Create the pull request as" },
+  );
+  if (!stateChoice) {
+    return;
+  }
+
+  // GitLab's merge-request form only accepts reviewer/label *ids*, so the
+  // pickers are GitHub-only; the provider lists are best-effort.
+  let reviewers: string[] = [];
+  let labels: string[] = [];
+  if (resolution.providerKind === "github") {
+    reviewers = await pickMany(
+      "Request review from (optional)",
+      () => provider.listAssignableUsers(),
+      [],
+    );
+    labels = await pickMany("Labels (optional)", () => provider.listLabels(), issue.labels);
+  }
+
   const gitlabHost =
     vscode.workspace.getConfiguration("remoteProjectManager").get<string>("gitlabHost", "") ||
     undefined;
-  const url = buildCompareUrl(
-    resolution.providerKind,
-    resolution.repository,
-    defaultBranch,
-    currentBranch,
-    title,
+  const url = buildCompareUrl({
+    providerKind: resolution.providerKind,
+    repository: resolution.repository,
+    baseBranch: defaultBranch,
+    headBranch: currentBranch,
+    title: title.trim(),
     body,
     gitlabHost,
-  );
+    draft: stateChoice.draft,
+    reviewers,
+    labels,
+  });
   await vscode.env.openExternal(vscode.Uri.parse(url));
 }
 
