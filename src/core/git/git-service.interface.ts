@@ -43,6 +43,9 @@ export interface IGitService {
   /** Validates `branchName` against git's ref-name rules. */
   isValidBranchName(branchName: string): Promise<boolean>;
 
+  /** Lists the paths staged for the next commit, relative to the repository root. */
+  getStagedFiles(cwd: string): Promise<string[]>;
+
   /** Returns the currently checked-out branch name. */
   getCurrentBranch(cwd: string): Promise<string>;
 

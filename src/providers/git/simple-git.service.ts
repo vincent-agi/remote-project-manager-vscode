@@ -91,6 +91,14 @@ export class SimpleGitService implements IGitService {
     }
   }
 
+  async getStagedFiles(cwd: string): Promise<string[]> {
+    const raw = await simpleGit(cwd).raw(["diff", "--cached", "--name-only"]);
+    return raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "");
+  }
+
   async getCurrentBranch(cwd: string): Promise<string> {
     const branch = await simpleGit(cwd).raw(["rev-parse", "--abbrev-ref", "HEAD"]);
     return branch.trim();

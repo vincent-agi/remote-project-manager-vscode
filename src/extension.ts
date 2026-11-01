@@ -29,6 +29,7 @@ import { PanelController } from "./webview/panel-controller";
 import type { InboundMessage, RepositoryOptionView } from "./webview/messages";
 import { getWebviewHtml } from "./webview/webview-html";
 import { extractIssueNumberFromBranch } from "./core/git/branch-issue-ref";
+import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
 import { logger } from "./logger";
 import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
@@ -1063,8 +1064,31 @@ async function composeCommit(
     return;
   }
 
+  const gitService = new SimpleGitService();
+  let currentBranch: string | null = null;
+  let stagedFiles: string[] = [];
+  try {
+    currentBranch = await gitService.getCurrentBranch(cwd);
+    stagedFiles = await gitService.getStagedFiles(cwd);
+  } catch {
+    // No git repo / no commits yet — proceed without suggestions.
+  }
+  const suggestedType = suggestCommitType(stagedFiles, currentBranch);
+  const suggestedScope = suggestCommitScope(stagedFiles);
+
+  // The suggested type is listed first and flagged, but stays a plain
+  // choice: the user can always pick another one.
+  const orderedTypes = suggestedType
+    ? [suggestedType, ...COMMIT_TYPES.filter((type) => type !== suggestedType)]
+    : [...COMMIT_TYPES];
   const typePick = await vscode.window.showQuickPick(
-    COMMIT_TYPES.map((type) => ({ label: type, description: COMMIT_TYPE_DESCRIPTIONS[type] })),
+    orderedTypes.map((type) => ({
+      label: type,
+      description:
+        type === suggestedType
+          ? `${COMMIT_TYPE_DESCRIPTIONS[type]} (suggested from staged files)`
+          : COMMIT_TYPE_DESCRIPTIONS[type],
+    })),
     { title: "Commit type", placeHolder: "Conventional Commits type" },
   );
   if (!typePick) {
@@ -1074,6 +1098,7 @@ async function composeCommit(
   const scope = await vscode.window.showInputBox({
     title: "Scope (optional)",
     prompt: "e.g. 'commits', 'ui' — leave empty for none",
+    value: suggestedScope,
   });
   if (scope === undefined) {
     return;
@@ -1093,14 +1118,9 @@ async function composeCommit(
     return;
   }
 
-  const gitService = new SimpleGitService();
-  let issueNumber: number | undefined;
-  try {
-    const branch = await gitService.getCurrentBranch(cwd);
-    issueNumber = extractIssueNumberFromBranch(branch) ?? undefined;
-  } catch {
-    // No git repo / no commits yet — proceed with no detected issue.
-  }
+  const branchIssueNumber =
+    currentBranch === null ? null : extractIssueNumberFromBranch(currentBranch);
+  let issueNumber: number | undefined = branchIssueNumber ?? undefined;
 
   if (issueNumber === undefined) {
     const manual = await vscode.window.showInputBox({
