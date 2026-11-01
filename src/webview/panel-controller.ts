@@ -6,7 +6,8 @@ import type {
   IAuthenticatedUser,
   IProjectProvider,
 } from "../core/providers/project-provider.interface";
-import { assertCanWrite } from "../core/providers/project-provider.interface";
+import { assertCanWrite, hasFetchTimestamps } from "../core/providers/project-provider.interface";
+import { isAuthError } from "../core/auth/is-auth-error";
 import type { InboundMessage, OutboundMessage, UiPrefsView } from "./messages";
 
 /** Called when an issue update crosses a recognized lifecycle transition. */
@@ -65,11 +66,15 @@ export class PanelController {
     private readonly onNewAssignment?: NewAssignmentHandler,
     private readonly onError?: (error: unknown) => void,
     private readonly uiPrefsStore?: UiPrefsStore,
+    private readonly onReconnectRequest?: () => void,
   ) {}
 
   async handleMessage(message: InboundMessage): Promise<void> {
     try {
       switch (message.type) {
+        case "reconnect":
+          this.onReconnectRequest?.();
+          return;
         case "saveUiPrefs":
           await this.uiPrefsStore?.set(message.prefs);
           return;
@@ -124,6 +129,7 @@ export class PanelController {
       this.postMessage({
         type: "error",
         message: error instanceof Error ? error.message : String(error),
+        ...(isAuthError(error) ? { authError: true } : {}),
       });
     }
   }
@@ -196,6 +202,9 @@ export class PanelController {
       currentUser,
       availableLabels,
       availableAssignableUsers,
+      ...(hasFetchTimestamps(this.provider) && this.provider.getIssuesFetchedAt() !== undefined
+        ? { dataFetchedAt: this.provider.getIssuesFetchedAt() }
+        : {}),
     });
   }
 }

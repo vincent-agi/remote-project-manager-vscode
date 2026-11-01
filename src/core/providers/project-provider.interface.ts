@@ -105,3 +105,17 @@ export function assertCanWrite(
     throw new Error(`Operation requires '${permission}', but the active account does not have it.`);
   }
 }
+
+/**
+ * Optional capability of a caching provider: when the issue list it hands
+ * out was last fetched from the remote (epoch ms), so the UI can say how
+ * stale cached data is.
+ */
+export interface IFetchTimestamps {
+  getIssuesFetchedAt(): number | undefined;
+}
+
+/** True when `provider` can report how old its cached issue list is. */
+export function hasFetchTimestamps(provider: object): provider is IFetchTimestamps {
+  return typeof (provider as Partial<IFetchTimestamps>).getIssuesFetchedAt === "function";
+}

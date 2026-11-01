@@ -30,6 +30,10 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
   </div>
 
   <div id="error-banner" class="error-banner" hidden></div>
+  <div id="cache-banner" class="cache-banner" role="status" hidden>
+    <span id="cache-banner-text"></span>
+    <button id="cache-banner-refresh" class="tab" type="button">Refresh now</button>
+  </div>
   <div id="toast" class="toast" hidden></div>
   <div id="shortcut-help" class="shortcut-help" role="dialog" aria-label="Keyboard shortcuts" hidden></div>
 
@@ -69,7 +73,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
         </span>
         <button id="issue-new" class="tab" type="button" disabled>+ New Issue</button>
       </div>
-      <div class="list" id="issue-list"></div>
+      <div class="list" id="issue-list" aria-busy="true" aria-label="Loading issues"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
     </div>
     <div class="detail" id="issue-detail"></div>
   </div>
@@ -84,7 +88,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
         </select>
         <button id="milestone-new" class="tab" type="button" disabled>+ New Milestone</button>
       </div>
-      <div class="list" id="milestone-list"></div>
+      <div class="list" id="milestone-list" aria-busy="true" aria-label="Loading milestones"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
     </div>
     <div class="detail" id="milestone-detail"></div>
   </div>

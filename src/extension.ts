@@ -459,6 +459,14 @@ async function buildController(
       get: () => context.workspaceState.get<Record<string, unknown>>(UI_PREFS_KEY, {}),
       set: (prefs) => context.workspaceState.update(UI_PREFS_KEY, prefs),
     },
+    () => {
+      // "Reconnect" button: drop the stored token and reopen the panel so
+      // the normal flow prompts for a fresh one.
+      void credentialStore.setToken(providerKind, "").then(() => {
+        panel.dispose();
+        void openPanel(context);
+      });
+    },
   );
 }
 

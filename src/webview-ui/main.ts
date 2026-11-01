@@ -5,6 +5,7 @@
 // because the host and webview programs have separate `rootDir`s.
 
 import { hasStateChanged } from "./state-diff.js";
+import { describeCacheAge } from "./cache-age.js";
 import { moveSelection, shortcutFor, SHORTCUT_HELP } from "./keyboard-shortcuts.js";
 import {
   computeMilestoneProgress,
@@ -95,6 +96,7 @@ type OutboundMessage =
       currentUser: AuthenticatedUser;
       availableLabels: string[];
       availableAssignableUsers: string[];
+      dataFetchedAt?: number;
     }
   | { type: "uiPrefs"; prefs: Record<string, unknown> }
   | { type: "repositoryOptions"; options: RepositoryOptionView[] }
@@ -102,7 +104,7 @@ type OutboundMessage =
   | { type: "openNewIssueForm" }
   | { type: "openNewMilestoneForm" }
   | { type: "actionSuccess"; message: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; authError?: boolean };
 
 type InboundMessage =
   | { type: "requestState"; forceRefresh?: boolean }
@@ -128,7 +130,8 @@ type InboundMessage =
       patch: Partial<Pick<MilestoneView, "title" | "description" | "state" | "dueOn">>;
     }
   | { type: "createBranchForIssue"; id: string }
-  | { type: "saveUiPrefs"; prefs: Record<string, unknown> };
+  | { type: "saveUiPrefs"; prefs: Record<string, unknown> }
+  | { type: "reconnect" };
 
 declare function acquireVsCodeApi(): {
   postMessage(message: InboundMessage): void;
@@ -177,12 +180,25 @@ function byId<T extends HTMLElement>(id: string): T {
 
 let errorTimer: number | undefined;
 
-function showError(message: string): void {
+function showError(message: string, authError = false): void {
   const banner = byId<HTMLDivElement>("error-banner");
   banner.textContent = message;
-  banner.hidden = false;
   window.clearTimeout(errorTimer);
-  errorTimer = window.setTimeout(clearError, 5000);
+  if (authError) {
+    // An expired token will not fix itself: keep the banner and offer the fix.
+    const reconnect = document.createElement("button");
+    reconnect.type = "button";
+    reconnect.className = "tab";
+    reconnect.textContent = "Reconnect";
+    reconnect.addEventListener("click", () => post({ type: "reconnect" }));
+    banner.append(" ", reconnect);
+  } else {
+    errorTimer = window.setTimeout(clearError, 5000);
+  }
+  banner.hidden = false;
+  setRefreshing(false);
+  // A failure before the first state would otherwise leave skeletons pulsing forever.
+  document.querySelectorAll(".skeleton-row").forEach((row) => row.remove());
 }
 
 function clearError(): void {
@@ -190,6 +206,23 @@ function clearError(): void {
   const banner = byId<HTMLDivElement>("error-banner");
   banner.hidden = true;
   banner.textContent = "";
+}
+
+let lastFetchedAt: number | undefined;
+
+/** Shows how stale the data is once it is over a minute old. */
+function updateCacheBanner(): void {
+  const text = describeCacheAge(lastFetchedAt, Date.now());
+  const banner = byId<HTMLDivElement>("cache-banner");
+  banner.hidden = text === null;
+  byId<HTMLSpanElement>("cache-banner-text").textContent = text ?? "";
+}
+
+function setRefreshing(refreshing: boolean): void {
+  const button = byId<HTMLButtonElement>("refresh-button");
+  button.disabled = refreshing;
+  button.textContent = refreshing ? "\u21BB Refreshing…" : "\u21BB Refresh";
+  document.body.setAttribute("aria-busy", String(refreshing));
 }
 
 let toastTimer: number | undefined;
@@ -229,6 +262,27 @@ function renderLabelBadges(labels: readonly string[]): string {
     .join("")}</span>`;
 }
 
+function renderEmptyState(
+  message: string,
+  actionLabel: string | null,
+  onAction: () => void,
+): HTMLElement {
+  const wrapper = document.createElement("div");
+  wrapper.className = "empty-state";
+  const text = document.createElement("p");
+  text.textContent = message;
+  wrapper.appendChild(text);
+  if (actionLabel) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tab";
+    button.textContent = actionLabel;
+    button.addEventListener("click", onAction);
+    wrapper.appendChild(button);
+  }
+  return wrapper;
+}
+
 function renderIssueList(): void {
   const list = byId<HTMLDivElement>("issue-list");
   list.innerHTML = "";
@@ -240,6 +294,18 @@ function renderIssueList(): void {
   );
 
   visibleIssueIds = [];
+  if (filtered.length === 0) {
+    list.appendChild(
+      renderEmptyState(
+        currentIssues.length === 0
+          ? "No issues in this repository yet."
+          : "No issues match the current filters.",
+        currentIssues.length === 0 ? null : "Clear filters",
+        () => setIssueFilter(EMPTY_FILTER),
+      ),
+    );
+    return;
+  }
   // Paging counts issues across sections: stop once the page is full.
   let remainingSlots = issueListPageSize;
   for (const section of sections) {
@@ -491,6 +557,18 @@ function renderMilestoneList(): void {
     milestoneStateFilter === "all"
       ? currentMilestones
       : currentMilestones.filter((candidate) => candidate.state === milestoneStateFilter);
+  if (milestones.length === 0) {
+    list.appendChild(
+      renderEmptyState(
+        currentMilestones.length === 0
+          ? "No milestones in this repository yet."
+          : "No milestones match the current filter.",
+        null,
+        () => undefined,
+      ),
+    );
+    return;
+  }
   const visibleMilestones = milestones.slice(0, milestoneListPageSize);
   for (const milestone of visibleMilestones) {
     const item = document.createElement("div");
@@ -862,9 +940,13 @@ byId<HTMLButtonElement>("milestone-new").addEventListener("click", () => {
   renderMilestoneList();
   renderMilestoneDetail();
 });
-byId<HTMLButtonElement>("refresh-button").addEventListener("click", () => {
+function requestRefresh(): void {
+  setRefreshing(true);
   post({ type: "requestState", forceRefresh: true });
-});
+}
+byId<HTMLButtonElement>("refresh-button").addEventListener("click", requestRefresh);
+byId<HTMLButtonElement>("cache-banner-refresh").addEventListener("click", requestRefresh);
+window.setInterval(updateCacheBanner, 30_000);
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -935,7 +1017,7 @@ document.addEventListener("keydown", (event) => {
       }
       return;
     case "refresh":
-      post({ type: "requestState", forceRefresh: true });
+      requestRefresh();
       return;
     case "help":
       toggleShortcutHelp();
@@ -964,6 +1046,10 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
       availableLabels: message.availableLabels,
       availableAssignableUsers: message.availableAssignableUsers,
     };
+    lastFetchedAt = message.dataFetchedAt;
+    updateCacheBanner();
+    setRefreshing(false);
+    byId<HTMLDivElement>("issue-list").removeAttribute("aria-busy");
     if (!hasStateChanged(lastState, snapshot)) {
       return;
     }
@@ -1021,7 +1107,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
   } else if (message.type === "actionSuccess") {
     showToast(message.message);
   } else if (message.type === "error") {
-    showError(message.message);
+    showError(message.message, message.authError === true);
   }
 });
 

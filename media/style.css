@@ -422,3 +422,39 @@ kbd {
   border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
   border-radius: 3px;
 }
+
+.cache-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  color: var(--vscode-inputValidation-infoForeground, var(--vscode-foreground));
+  background-color: var(--vscode-inputValidation-infoBackground);
+  border-bottom: 1px solid var(--vscode-inputValidation-infoBorder, var(--vscode-panel-border));
+}
+
+.empty-state {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+.skeleton-row {
+  height: 18px;
+  margin: 10px 8px;
+  border-radius: 3px;
+  background-color: var(--vscode-input-background);
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-row {
+    animation: none;
+  }
+}

@@ -481,7 +481,11 @@ describe("PanelController error handling", () => {
     await controller.handleMessage({ type: "requestState" });
 
     expect(onError).toHaveBeenCalledWith(authError);
-    expect(postMessage).toHaveBeenCalledWith({ type: "error", message: "401 Unauthorized" });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: "error",
+      message: "401 Unauthorized",
+      authError: true,
+    });
   });
 });
 
@@ -534,5 +538,61 @@ describe("PanelController UI preferences", () => {
     await controller.handleMessage({ type: "requestState" });
 
     expect(posted.map((message) => message.type)).toEqual(["state"]);
+  });
+});
+
+describe("PanelController connection feedback", () => {
+  it("flags authentication failures so the webview can offer to reconnect", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.getCapabilities as ReturnType<typeof vi.fn>).mockRejectedValue(
+      Object.assign(new Error("Bad credentials"), { status: 401 }),
+    );
+    const posted: { type: string; authError?: boolean }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.at(-1)).toMatchObject({ type: "error", authError: true });
+  });
+
+  it("does not flag other errors", async () => {
+    const provider = makeProvider(fullAccess);
+    (provider.listIssues as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
+    const posted: { type: string; authError?: boolean }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.at(-1)?.authError).toBeUndefined();
+  });
+
+  it("includes the issue list's fetch time when the provider reports one", async () => {
+    const provider = Object.assign(makeProvider(fullAccess), {
+      getIssuesFetchedAt: () => 1234,
+    });
+    const posted: { type: string; dataFetchedAt?: number }[] = [];
+    const controller = new PanelController(provider, (message) => posted.push(message));
+
+    await controller.handleMessage({ type: "requestState" });
+
+    expect(posted.find((message) => message.type === "state")?.dataFetchedAt).toBe(1234);
+  });
+
+  it("forwards a reconnect request", async () => {
+    const onReconnect = vi.fn();
+    const controller = new PanelController(
+      makeProvider(fullAccess),
+      vi.fn(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onReconnect,
+    );
+
+    await controller.handleMessage({ type: "reconnect" });
+
+    expect(onReconnect).toHaveBeenCalledOnce();
   });
 });
