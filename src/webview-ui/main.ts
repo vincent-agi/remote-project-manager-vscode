@@ -5,6 +5,7 @@
 // because the host and webview programs have separate `rootDir`s.
 
 import { hasStateChanged } from "./state-diff.js";
+import { BOARD_COLUMNS, buildBoard, planBoardMove, type BoardColumnId } from "./board-model.js";
 import { describeCacheAge } from "./cache-age.js";
 import { moveSelection, shortcutFor, SHORTCUT_HELP } from "./keyboard-shortcuts.js";
 import {
@@ -789,6 +790,7 @@ function setIssueFilter(next: IssueFilter): void {
   issueListPageSize = LIST_PAGE_SIZE;
   syncFilterControls();
   renderIssueList();
+  renderBoardIfVisible();
 }
 
 function persistListPrefs(): void {
@@ -847,11 +849,126 @@ function syncFilterControls(): void {
     !matching || !savedFilters.some((entry) => entry.name === matching.name);
 }
 
-function setActiveTab(tab: "issues" | "milestones"): void {
-  byId<HTMLButtonElement>("tab-issues").classList.toggle("active", tab === "issues");
-  byId<HTMLButtonElement>("tab-milestones").classList.toggle("active", tab === "milestones");
-  byId<HTMLDivElement>("view-issues").hidden = tab !== "issues";
-  byId<HTMLDivElement>("view-milestones").hidden = tab !== "milestones";
+type TabName = "issues" | "milestones" | "board";
+
+function activeTab(): TabName {
+  for (const tab of ["milestones", "board"] as const) {
+    if (byId<HTMLButtonElement>(`tab-${tab}`).classList.contains("active")) {
+      return tab;
+    }
+  }
+  return "issues";
+}
+
+function setActiveTab(tab: TabName): void {
+  for (const name of ["issues", "milestones", "board"] as const) {
+    byId<HTMLButtonElement>(`tab-${name}`).classList.toggle("active", tab === name);
+    byId<HTMLDivElement>(`view-${name}`).hidden = tab !== name;
+  }
+  if (tab === "board") {
+    renderBoard();
+  }
+}
+
+function renderBoardIfVisible(): void {
+  if (activeTab() === "board") {
+    renderBoard();
+  }
+}
+
+/** Applies a board move, enforcing write access client-side too (the host re-checks). */
+function moveIssueToColumn(issueId: string, column: BoardColumnId): void {
+  const issue = currentIssues.find((candidate) => candidate.id === issueId);
+  if (!issue) {
+    return;
+  }
+  if (!currentCapabilities.canWriteIssues) {
+    showError("Your account does not have write access to issues.");
+    return;
+  }
+  const patch = planBoardMove(issue, column);
+  if (patch) {
+    post({ type: "updateIssue", id: issue.id, patch });
+  }
+}
+
+function renderBoard(): void {
+  const container = byId<HTMLDivElement>("board");
+  container.innerHTML = "";
+  const canWrite = currentCapabilities.canWriteIssues;
+  const visible = sortIssues(
+    filterIssues(currentIssues, issueFilter, currentUser?.username ?? null),
+    issueSort,
+  );
+  byId<HTMLParagraphElement>("board-note").textContent =
+    `${visible.length} issue${visible.length === 1 ? "" : "s"} shown. The filters of the Issues tab apply.` +
+    (canWrite ? " Drag a card, or use its Move menu, to change its status." : "");
+
+  for (const column of buildBoard(visible)) {
+    const section = document.createElement("section");
+    section.className = "board-column";
+    section.setAttribute("aria-label", `${column.title}, ${column.issues.length} issues`);
+    const header = document.createElement("h3");
+    header.textContent = `${column.title} (${column.issues.length})`;
+    section.appendChild(header);
+
+    section.addEventListener("dragover", (event) => {
+      if (canWrite) {
+        event.preventDefault();
+        section.classList.add("drop-target");
+      }
+    });
+    section.addEventListener("dragleave", () => section.classList.remove("drop-target"));
+    section.addEventListener("drop", (event) => {
+      event.preventDefault();
+      section.classList.remove("drop-target");
+      const issueId = event.dataTransfer?.getData("text/plain");
+      if (issueId) {
+        moveIssueToColumn(issueId, column.id);
+      }
+    });
+
+    for (const issue of column.issues) {
+      const card = document.createElement("article");
+      card.className = "board-card";
+      card.draggable = canWrite;
+      card.addEventListener("dragstart", (event) => {
+        event.dataTransfer?.setData("text/plain", issue.id);
+      });
+
+      const title = document.createElement("button");
+      title.type = "button";
+      title.className = "board-card-title";
+      title.innerHTML = `<span class="number">#${issue.number}</span> ${escapeHtml(issue.title)}`;
+      title.addEventListener("click", () => {
+        selectedIssueId = issue.id;
+        showNewIssueForm = false;
+        setActiveTab("issues");
+        renderIssueList();
+        renderIssueDetail();
+      });
+      card.appendChild(title);
+      card.insertAdjacentHTML("beforeend", renderLabelBadges(issue.labels));
+
+      const move = document.createElement("select");
+      move.className = "board-card-move";
+      move.disabled = !canWrite;
+      move.setAttribute("aria-label", `Move issue #${issue.number}`);
+      move.innerHTML =
+        `<option value="">Move to…</option>` +
+        BOARD_COLUMNS.filter((target) => target.id !== column.id)
+          .map((target) => `<option value="${target.id}">${escapeHtml(target.title)}</option>`)
+          .join("");
+      move.addEventListener("change", () => {
+        if (move.value) {
+          moveIssueToColumn(issue.id, move.value as BoardColumnId);
+        }
+      });
+      card.appendChild(move);
+      section.appendChild(card);
+    }
+    container.appendChild(section);
+  }
 }
 
 byId<HTMLButtonElement>("tab-issues").addEventListener("click", () => {
@@ -928,6 +1045,7 @@ byId<HTMLSelectElement>("milestone-state-filter").addEventListener("change", (ev
 byId<HTMLButtonElement>("tab-milestones").addEventListener("click", () =>
   setActiveTab("milestones"),
 );
+byId<HTMLButtonElement>("tab-board").addEventListener("click", () => setActiveTab("board"));
 byId<HTMLButtonElement>("issue-new").addEventListener("click", () => {
   selectedIssueId = null;
   showNewIssueForm = true;
@@ -1032,11 +1150,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
   if (message.type === "state") {
     clearError();
     byId<HTMLDivElement>("repository-picker").hidden = true;
-    setActiveTab(
-      byId<HTMLButtonElement>("tab-milestones").classList.contains("active")
-        ? "milestones"
-        : "issues",
-    );
+    setActiveTab(activeTab());
 
     const snapshot: StateSnapshot = {
       issues: message.issues,
@@ -1067,6 +1181,7 @@ window.addEventListener("message", (event: MessageEvent<OutboundMessage>) => {
     byId<HTMLButtonElement>("issue-new").disabled = !currentCapabilities.canWriteIssues;
     byId<HTMLButtonElement>("milestone-new").disabled = !currentCapabilities.canWriteMilestones;
     renderIssueList();
+    renderBoardIfVisible();
     // Skip re-rendering the create form while it's open — the "state"
     // handler runs on every refresh/edit, and re-rendering would wipe
     // out an in-progress, unsaved draft (see #49).

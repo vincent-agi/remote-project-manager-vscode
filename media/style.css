@@ -458,3 +458,68 @@ kbd {
     animation: none;
   }
 }
+
+.board-view {
+  display: block;
+  padding: 8px;
+  overflow: auto;
+}
+
+.board-note {
+  margin: 0 0 8px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.board-column {
+  padding: 6px;
+  min-height: 120px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+}
+
+.board-column.drop-target {
+  outline: 2px dashed var(--vscode-focusBorder);
+}
+
+.board-column h3 {
+  margin: 0 0 6px;
+  font-size: 1em;
+}
+
+.board-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 6px;
+  background-color: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  border-radius: 4px;
+}
+
+.board-card[draggable="true"] {
+  cursor: grab;
+}
+
+.board-card-title {
+  padding: 0;
+  text-align: left;
+  color: var(--vscode-textLink-foreground);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.board-card-move {
+  align-self: flex-start;
+  color: var(--vscode-input-foreground);
+  background-color: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+}

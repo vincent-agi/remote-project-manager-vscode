@@ -25,6 +25,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
 <body>
   <div class="tabs">
     <button id="tab-issues" class="tab active" type="button">Issues</button>
+    <button id="tab-board" class="tab" type="button">Board</button>
     <button id="tab-milestones" class="tab" type="button">Milestones</button>
     <button id="refresh-button" class="tab refresh" type="button" title="Refetch from the remote, bypassing the cache">&#8635; Refresh</button>
   </div>
@@ -76,6 +77,11 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
       <div class="list" id="issue-list" aria-busy="true" aria-label="Loading issues"><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div></div>
     </div>
     <div class="detail" id="issue-detail"></div>
+  </div>
+
+  <div id="view-board" class="view board-view" hidden>
+    <p id="board-note" class="board-note"></p>
+    <div id="board" class="board"></div>
   </div>
 
   <div id="view-milestones" class="view" hidden>
