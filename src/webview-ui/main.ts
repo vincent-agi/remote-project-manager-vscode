@@ -6,6 +6,11 @@
 
 import { hasStateChanged } from "./state-diff.js";
 import {
+  computeMilestoneProgress,
+  describeDue,
+  type MilestoneProgress,
+} from "./milestone-progress.js";
+import {
   EMPTY_FILTER,
   filterIssues,
   NO_MILESTONE,
@@ -453,6 +458,27 @@ function renderIssueDetail(): void {
   }
 }
 
+function milestoneProgress(milestone: MilestoneView): MilestoneProgress {
+  const linkedStates = currentIssues
+    .filter((candidate) => candidate.milestoneId === milestone.id)
+    .map((candidate) => candidate.state);
+  return computeMilestoneProgress(milestone, linkedStates, new Date());
+}
+
+/**
+ * Progress bar with a text alternative; overdue is shown by a warning mark,
+ * not colour alone. A native `<progress>` is used because the webview CSP
+ * forbids inline `style` attributes, which a width-based bar would need.
+ */
+function renderProgressBar(progress: MilestoneProgress): string {
+  const summary = `${progress.closed} of ${progress.total} issues closed (${progress.percent}%)`;
+  const due = describeDue(progress);
+  return `<div class="progress-block${progress.overdue ? " overdue" : ""}">
+    <progress class="progress" max="100" value="${progress.percent}" aria-label="${escapeAttr(summary)}"></progress>
+    <div class="progress-caption"><span>${escapeHtml(summary)}</span><span class="progress-due">${progress.overdue ? "&#9888; " : ""}${escapeHtml(due)}</span></div>
+  </div>`;
+}
+
 function renderMilestoneList(): void {
   const list = byId<HTMLDivElement>("milestone-list");
   list.innerHTML = "";
@@ -468,7 +494,7 @@ function renderMilestoneList(): void {
     const due = milestone.dueOn
       ? `<span class="due">Due ${formatDate(milestone.dueOn)}</span>`
       : "";
-    item.innerHTML = `<span class="${stateClass}">${escapeHtml(milestone.title)}</span>${due}`;
+    item.innerHTML = `<span class="${stateClass}">${escapeHtml(milestone.title)}</span>${due}${renderProgressBar(milestoneProgress(milestone))}`;
     item.addEventListener("click", () => {
       selectedMilestoneId = milestone.id;
       showNewMilestoneForm = false;
@@ -551,6 +577,8 @@ function renderMilestoneDetail(): void {
       <div class="meta-row"><span class="meta-key">Created</span><span class="meta-value">${formatDate(milestone.createdAt)}</span></div>
       <div class="meta-row"><span class="meta-key">Updated</span><span class="meta-value">${formatDate(milestone.updatedAt)}</span></div>
     </div>
+
+    ${renderProgressBar(milestoneProgress(milestone))}
 
     <label for="milestone-title">Title</label>
     <input id="milestone-title" type="text" value="${escapeAttr(milestone.title)}" ${canWrite ? "" : "disabled"} />
