@@ -44,7 +44,8 @@
       },
       {
         "command": "remoteProjectManager.composeCommit",
-        "title": "Remote Project Manager: Compose Commit (Conventional + Gitmoji)"
+        "title": "Remote Project Manager: Compose Commit (Conventional + Gitmoji)",
+        "icon": "$(sparkle)"
       },
       {
         "command": "remoteProjectManager.pickGitmoji",
@@ -85,6 +86,14 @@
       {
         "command": "remoteProjectManager.runDiagnostics",
         "title": "Remote Project Manager: Run Diagnostics"
+      },
+      {
+        "command": "remoteProjectManager.installCommitMsgHook",
+        "title": "Remote Project Manager: Install Commit Message Hook"
+      },
+      {
+        "command": "remoteProjectManager.uninstallCommitMsgHook",
+        "title": "Remote Project Manager: Uninstall Commit Message Hook"
       }
     ],
     "viewsContainers": {
@@ -152,6 +161,21 @@
           "type": "string",
           "default": ".github/copilot-instructions.md",
           "description": "Workspace-relative path 'Export Milestone Context for AI Agents' writes to. Only the extension-managed section (between HTML comment markers) is replaced on re-export; the rest of the file, if any, is left untouched."
+        },
+        "remoteProjectManager.syncMarkInProgressOnCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add the 'in-progress' label to an issue assigned to you after your first commit on its branch."
+        },
+        "remoteProjectManager.syncRemindMissingIssue": {
+          "type": "boolean",
+          "default": true,
+          "description": "Remind you once per branch when you commit on a branch whose name does not reference an issue."
+        },
+        "remoteProjectManager.syncProposeCloseOnMerge": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer to close an open issue assigned to you when a commit on the default branch already closes it (Fixes/Closes/Resolves #N)."
         }
       }
     },
@@ -206,6 +230,13 @@
         {
           "command": "remoteProjectManager.openIssueInBrowser",
           "when": "false"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "remoteProjectManager.composeCommit",
+          "when": "scmProvider == git",
+          "group": "navigation@10"
         }
       ]
     },

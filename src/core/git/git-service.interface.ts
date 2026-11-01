@@ -43,13 +43,19 @@ export interface IGitService {
   /** Validates `branchName` against git's ref-name rules. */
   isValidBranchName(branchName: string): Promise<boolean>;
 
+  /** Lists the paths staged for the next commit, relative to the repository root. */
+  getStagedFiles(cwd: string): Promise<string[]>;
+
   /** Returns the currently checked-out branch name. */
   getCurrentBranch(cwd: string): Promise<string>;
 
   /**
    * Lists commits reachable from `range` (a git revision range, e.g.
    * `"origin/main..HEAD"`), most recent first. Defaults to `HEAD` alone
-   * when `range` is omitted.
+   * when `range` is omitted. `maxCount` caps the number of commits read.
    */
-  log(cwd: string, range?: string): Promise<GitLogEntry[]>;
+  log(cwd: string, range?: string, maxCount?: number): Promise<GitLogEntry[]>;
+
+  /** Subject of the latest reflog entry for HEAD (e.g. `"commit: feat: ..."`, `"checkout: moving ..."`). */
+  getLastReflogSubject(cwd: string): Promise<string>;
 }

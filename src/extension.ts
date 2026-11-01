@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { promises as fs } from "node:fs";
 import { Octokit } from "@octokit/rest";
 import { Gitlab } from "@gitbeaker/rest";
 import { ensureToken, type ICredentialStore } from "./core/auth/ensure-token";
@@ -29,7 +30,11 @@ import { PanelController } from "./webview/panel-controller";
 import type { InboundMessage, RepositoryOptionView } from "./webview/messages";
 import { getWebviewHtml } from "./webview/webview-html";
 import { extractIssueNumberFromBranch } from "./core/git/branch-issue-ref";
+import { buildCommitMsgHookScript, classifyExistingHook } from "./core/git/commit-msg-hook";
+import { buildCompareUrl } from "./core/git/compare-url";
+import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
+import { StateSync } from "./state-sync";
 import { logger } from "./logger";
 import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
 import type { SyncState } from "./core/status/status-bar-model";
@@ -42,7 +47,7 @@ import {
 import { parseGitmojis, type Gitmoji } from "./core/git/gitmoji";
 import { groupCommitsByIssue } from "./core/git/graph";
 import { lintCommits } from "./core/git/lint-commits";
-import { buildPrBody, buildPrTitle, type CommitRef } from "./core/git/pr-body";
+import { buildConventionalPrTitle, buildPrBody, type CommitRef } from "./core/git/pr-body";
 import { formatIssueContext } from "./core/ai/issue-context";
 import { formatMilestoneContext } from "./core/ai/milestone-context";
 import { replaceManagedSection } from "./core/ai/managed-section";
@@ -686,6 +691,12 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
     this.changeEmitter.fire();
   }
 
+  /** The connection built by the last tree load, if any — never prompts or connects. */
+  getEstablishedConnection():
+    { provider: IProjectProvider; currentUser: IAuthenticatedUser } | undefined {
+    return this.connection;
+  }
+
   /** Re-renders the tree (re-resolving the repository) without dropping a still-valid connection. */
   refresh(): void {
     this.changeEmitter.fire();
@@ -1050,15 +1061,44 @@ async function getActiveConnection(
  * into the Source Control input box (or the clipboard, if the git
  * extension isn't available).
  */
-async function composeCommit(context: vscode.ExtensionContext): Promise<void> {
-  const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+async function composeCommit(
+  context: vscode.ExtensionContext,
+  scm?: { readonly rootUri?: vscode.Uri },
+): Promise<void> {
+  // The Source Control title button passes the clicked repository, so in a
+  // multi-root workspace the message lands in that repository's input box.
+  const cwd =
+    scm?.rootUri?.fsPath ?? activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!cwd) {
     void vscode.window.showErrorMessage("No workspace folder open.");
     return;
   }
 
+  const gitService = new SimpleGitService();
+  let currentBranch: string | null = null;
+  let stagedFiles: string[] = [];
+  try {
+    currentBranch = await gitService.getCurrentBranch(cwd);
+    stagedFiles = await gitService.getStagedFiles(cwd);
+  } catch {
+    // No git repo / no commits yet — proceed without suggestions.
+  }
+  const suggestedType = suggestCommitType(stagedFiles, currentBranch);
+  const suggestedScope = suggestCommitScope(stagedFiles);
+
+  // The suggested type is listed first and flagged, but stays a plain
+  // choice: the user can always pick another one.
+  const orderedTypes = suggestedType
+    ? [suggestedType, ...COMMIT_TYPES.filter((type) => type !== suggestedType)]
+    : [...COMMIT_TYPES];
   const typePick = await vscode.window.showQuickPick(
-    COMMIT_TYPES.map((type) => ({ label: type, description: COMMIT_TYPE_DESCRIPTIONS[type] })),
+    orderedTypes.map((type) => ({
+      label: type,
+      description:
+        type === suggestedType
+          ? `${COMMIT_TYPE_DESCRIPTIONS[type]} (suggested from staged files)`
+          : COMMIT_TYPE_DESCRIPTIONS[type],
+    })),
     { title: "Commit type", placeHolder: "Conventional Commits type" },
   );
   if (!typePick) {
@@ -1068,6 +1108,7 @@ async function composeCommit(context: vscode.ExtensionContext): Promise<void> {
   const scope = await vscode.window.showInputBox({
     title: "Scope (optional)",
     prompt: "e.g. 'commits', 'ui' — leave empty for none",
+    value: suggestedScope,
   });
   if (scope === undefined) {
     return;
@@ -1087,14 +1128,9 @@ async function composeCommit(context: vscode.ExtensionContext): Promise<void> {
     return;
   }
 
-  const gitService = new SimpleGitService();
-  let issueNumber: number | undefined;
-  try {
-    const branch = await gitService.getCurrentBranch(cwd);
-    issueNumber = extractIssueNumberFromBranch(branch) ?? undefined;
-  } catch {
-    // No git repo / no commits yet — proceed with no detected issue.
-  }
+  const branchIssueNumber =
+    currentBranch === null ? null : extractIssueNumberFromBranch(currentBranch);
+  let issueNumber: number | undefined = branchIssueNumber ?? undefined;
 
   if (issueNumber === undefined) {
     const manual = await vscode.window.showInputBox({
@@ -1220,28 +1256,30 @@ async function copyIssueContext(
   void vscode.window.showInformationMessage(`Copied issue #${issue.number} context to clipboard.`);
 }
 
-/** Builds a prefilled GitHub compare or GitLab merge-request URL (fallback when direct PR creation isn't wired up). */
-function buildCompareUrl(
-  providerKind: ProviderKind,
-  repository: string,
-  baseBranch: string,
-  headBranch: string,
+/**
+ * Multi-select QuickPick over a provider-supplied list, with `preselected`
+ * entries ticked. Best-effort: a failing or empty list yields `[]` rather
+ * than blocking the flow; cancelling the picker also yields `[]`.
+ */
+async function pickMany(
   title: string,
-  body: string,
-  gitlabHost: string | undefined,
-): string {
-  if (providerKind === "github") {
-    const params = new URLSearchParams({ quick_pull: "1", title, body });
-    return `https://github.com/${repository}/compare/${encodeURIComponent(baseBranch)}...${encodeURIComponent(headBranch)}?${params.toString()}`;
+  load: () => Promise<readonly string[]>,
+  preselected: readonly string[],
+): Promise<string[]> {
+  let options: readonly string[];
+  try {
+    options = await load();
+  } catch {
+    return [];
   }
-  const host = gitlabHost || "gitlab.com";
-  const params = new URLSearchParams({
-    "merge_request[source_branch]": headBranch,
-    "merge_request[target_branch]": baseBranch,
-    "merge_request[title]": title,
-    "merge_request[description]": body,
-  });
-  return `https://${host}/${repository}/-/merge_requests/new?${params.toString()}`;
+  if (options.length === 0) {
+    return [];
+  }
+  const picked = await vscode.window.showQuickPick(
+    options.map((option) => ({ label: option, picked: preselected.includes(option) })),
+    { title, canPickMany: true },
+  );
+  return picked?.map((item) => item.label) ?? [];
 }
 
 /** Generates a PR/MR pre-filled from the active issue, its commits, and its milestone (#58). */
@@ -1295,7 +1333,7 @@ async function createPrFromIssue(
     }
   }
 
-  const title = buildPrTitle(issue);
+  const suggestedTitle = buildConventionalPrTitle(issue, commits);
   const body = buildPrBody(issue, milestone, commits);
 
   const resolution = await resolveRepository();
@@ -1307,18 +1345,55 @@ async function createPrFromIssue(
     return;
   }
 
+  const title = await vscode.window.showInputBox({
+    title: "Pull request title",
+    prompt: "Generated from the branch's commits (Conventional Commits). Edit if needed.",
+    value: suggestedTitle,
+    validateInput: (value) => (value.trim() ? undefined : "Title is required."),
+  });
+  if (title === undefined) {
+    return;
+  }
+
+  const stateChoice = await vscode.window.showQuickPick(
+    [
+      { label: "Ready for review", draft: false },
+      { label: "Draft", description: "Not ready to be merged yet", draft: true },
+    ],
+    { title: "Create the pull request as" },
+  );
+  if (!stateChoice) {
+    return;
+  }
+
+  // GitLab's merge-request form only accepts reviewer/label *ids*, so the
+  // pickers are GitHub-only; the provider lists are best-effort.
+  let reviewers: string[] = [];
+  let labels: string[] = [];
+  if (resolution.providerKind === "github") {
+    reviewers = await pickMany(
+      "Request review from (optional)",
+      () => provider.listAssignableUsers(),
+      [],
+    );
+    labels = await pickMany("Labels (optional)", () => provider.listLabels(), issue.labels);
+  }
+
   const gitlabHost =
     vscode.workspace.getConfiguration("remoteProjectManager").get<string>("gitlabHost", "") ||
     undefined;
-  const url = buildCompareUrl(
-    resolution.providerKind,
-    resolution.repository,
-    defaultBranch,
-    currentBranch,
-    title,
+  const url = buildCompareUrl({
+    providerKind: resolution.providerKind,
+    repository: resolution.repository,
+    baseBranch: defaultBranch,
+    headBranch: currentBranch,
+    title: title.trim(),
     body,
     gitlabHost,
-  );
+    draft: stateChoice.draft,
+    reviewers,
+    labels,
+  });
   await vscode.env.openExternal(vscode.Uri.parse(url));
 }
 
@@ -1516,6 +1591,88 @@ function readExtensionVersion(context: vscode.ExtensionContext): string {
   return typeof version === "string" ? version : "unknown";
 }
 
+/** Reads a file as UTF-8, or `undefined` when it does not exist. */
+async function readTextIfExists(uri: vscode.Uri): Promise<string | undefined> {
+  try {
+    return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** Installs the commit-msg hook (#85) that runs the commit convention check locally. */
+async function installCommitMsgHook(): Promise<void> {
+  const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!cwd) {
+    void vscode.window.showErrorMessage("No workspace folder open.");
+    return;
+  }
+  try {
+    const hooksDir = vscode.Uri.file(await new SimpleGitService().getHooksPath(cwd));
+    const hookUri = vscode.Uri.joinPath(hooksDir, "commit-msg");
+    const existing = await readTextIfExists(hookUri);
+    if (classifyExistingHook(existing) === "foreign") {
+      const choice = await vscode.window.showWarningMessage(
+        "A commit-msg hook already exists. Replace it? The current one is kept as commit-msg.backup.",
+        { modal: true },
+        "Replace",
+      );
+      if (choice !== "Replace") {
+        return;
+      }
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.joinPath(hooksDir, "commit-msg.backup"),
+        Buffer.from(existing ?? "", "utf8"),
+      );
+    }
+    await vscode.workspace.fs.createDirectory(hooksDir);
+    await vscode.workspace.fs.writeFile(hookUri, Buffer.from(buildCommitMsgHookScript(), "utf8"));
+    await fs.chmod(hookUri.fsPath, 0o755);
+    void vscode.window.showInformationMessage(
+      `Commit message hook installed in ${hookUri.fsPath}.`,
+    );
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `Could not install the commit message hook: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** Removes the hook written by {@link installCommitMsgHook}, restoring a backed-up one. */
+async function uninstallCommitMsgHook(): Promise<void> {
+  const cwd = activeFolderPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!cwd) {
+    void vscode.window.showErrorMessage("No workspace folder open.");
+    return;
+  }
+  try {
+    const hooksDir = vscode.Uri.file(await new SimpleGitService().getHooksPath(cwd));
+    const hookUri = vscode.Uri.joinPath(hooksDir, "commit-msg");
+    const kind = classifyExistingHook(await readTextIfExists(hookUri));
+    if (kind !== "managed") {
+      void vscode.window.showInformationMessage(
+        kind === "none"
+          ? "No commit-msg hook is installed."
+          : "The existing commit-msg hook was not installed by this extension; leaving it alone.",
+      );
+      return;
+    }
+    await vscode.workspace.fs.delete(hookUri);
+    const backupUri = vscode.Uri.joinPath(hooksDir, "commit-msg.backup");
+    const backup = await readTextIfExists(backupUri);
+    if (backup !== undefined) {
+      await vscode.workspace.fs.writeFile(hookUri, Buffer.from(backup, "utf8"));
+      await fs.chmod(hookUri.fsPath, 0o755);
+      await vscode.workspace.fs.delete(backupUri);
+    }
+    void vscode.window.showInformationMessage("Commit message hook removed.");
+  } catch (error) {
+    void vscode.window.showErrorMessage(
+      `Could not remove the commit message hook: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 /**
  * "Run diagnostics" (#82): probes the remote detection, the stored token
  * and (only when a token already exists, so no prompt is ever raised) the
@@ -1618,10 +1775,21 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
   const statusBar = new IssueStatusBar();
   logger.info("Remote Project Manager activated");
+  const stateSync = new StateSync(
+    context,
+    () => treeDataProvider.getEstablishedConnection(),
+    () => treeDataProvider.refresh(),
+  );
   context.subscriptions.push(
     statusBar,
+    stateSync,
     new vscode.Disposable(() => logger.dispose()),
-    treeDataProvider.onDidSync(({ sync, folderPath }) => statusBar.update(sync, folderPath)),
+    treeDataProvider.onDidSync(({ sync, folderPath }) => {
+      statusBar.update(sync, folderPath);
+      if (sync.kind === "ok") {
+        stateSync.onSynced(folderPath);
+      }
+    }),
   );
   registerRepositorySync(context, treeDataProvider);
   // Opening a folder ("Open Folder", "Open Recent") restarts the extension
@@ -1643,15 +1811,24 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
     vscode.commands.registerCommand("remoteProjectManager.newMilestone", () => {
       void openPanel(context, { kind: "newMilestone" });
     }),
+    vscode.commands.registerCommand("remoteProjectManager.installCommitMsgHook", () => {
+      void installCommitMsgHook();
+    }),
+    vscode.commands.registerCommand("remoteProjectManager.uninstallCommitMsgHook", () => {
+      void uninstallCommitMsgHook();
+    }),
     vscode.commands.registerCommand("remoteProjectManager.runDiagnostics", () => {
       void runDiagnostics(context);
     }),
     vscode.commands.registerCommand("remoteProjectManager.refresh", () => {
       void openPanel(context, { kind: "refresh" });
     }),
-    vscode.commands.registerCommand("remoteProjectManager.composeCommit", () => {
-      void composeCommit(context);
-    }),
+    vscode.commands.registerCommand(
+      "remoteProjectManager.composeCommit",
+      (scm?: { readonly rootUri?: vscode.Uri }) => {
+        void composeCommit(context, scm);
+      },
+    ),
     vscode.commands.registerCommand("remoteProjectManager.pickGitmoji", () => {
       void pickGitmojiCommand(context);
     }),
