@@ -52,7 +52,10 @@ export interface IGitService {
   /**
    * Lists commits reachable from `range` (a git revision range, e.g.
    * `"origin/main..HEAD"`), most recent first. Defaults to `HEAD` alone
-   * when `range` is omitted.
+   * when `range` is omitted. `maxCount` caps the number of commits read.
    */
-  log(cwd: string, range?: string): Promise<GitLogEntry[]>;
+  log(cwd: string, range?: string, maxCount?: number): Promise<GitLogEntry[]>;
+
+  /** Subject of the latest reflog entry for HEAD (e.g. `"commit: feat: ..."`, `"checkout: moving ..."`). */
+  getLastReflogSubject(cwd: string): Promise<string>;
 }

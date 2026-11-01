@@ -34,6 +34,7 @@ import { buildCommitMsgHookScript, classifyExistingHook } from "./core/git/commi
 import { buildCompareUrl } from "./core/git/compare-url";
 import { suggestCommitScope, suggestCommitType } from "./core/git/commit-suggestions";
 import { IssueStatusBar } from "./status-bar";
+import { StateSync } from "./state-sync";
 import { logger } from "./logger";
 import { formatDiagnosticsReport, type DiagnosticsInput } from "./core/diagnostics/report";
 import type { SyncState } from "./core/status/status-bar-model";
@@ -688,6 +689,12 @@ class MyIssuesTreeDataProvider implements vscode.TreeDataProvider<MyIssueSummary
     this.connection = undefined;
     this.connectionKey = undefined;
     this.changeEmitter.fire();
+  }
+
+  /** The connection built by the last tree load, if any — never prompts or connects. */
+  getEstablishedConnection():
+    { provider: IProjectProvider; currentUser: IAuthenticatedUser } | undefined {
+    return this.connection;
   }
 
   /** Re-renders the tree (re-resolving the repository) without dropping a still-valid connection. */
@@ -1768,10 +1775,21 @@ export function activate(context: vscode.ExtensionContext): RemoteProjectManager
   const treeDataProvider = new MyIssuesTreeDataProvider(context);
   const statusBar = new IssueStatusBar();
   logger.info("Remote Project Manager activated");
+  const stateSync = new StateSync(
+    context,
+    () => treeDataProvider.getEstablishedConnection(),
+    () => treeDataProvider.refresh(),
+  );
   context.subscriptions.push(
     statusBar,
+    stateSync,
     new vscode.Disposable(() => logger.dispose()),
-    treeDataProvider.onDidSync(({ sync, folderPath }) => statusBar.update(sync, folderPath)),
+    treeDataProvider.onDidSync(({ sync, folderPath }) => {
+      statusBar.update(sync, folderPath);
+      if (sync.kind === "ok") {
+        stateSync.onSynced(folderPath);
+      }
+    }),
   );
   registerRepositorySync(context, treeDataProvider);
   // Opening a folder ("Open Folder", "Open Recent") restarts the extension

@@ -112,10 +112,16 @@ export class SimpleGitService implements IGitService {
     return branch.trim();
   }
 
-  async log(cwd: string, range?: string): Promise<GitLogEntry[]> {
+  async getLastReflogSubject(cwd: string): Promise<string> {
+    const raw = await simpleGit(cwd).raw(["reflog", "-1", "--format=%gs"]);
+    return raw.trim();
+  }
+
+  async log(cwd: string, range?: string, maxCount?: number): Promise<GitLogEntry[]> {
     const raw = await simpleGit(cwd).raw([
       "log",
       `--pretty=format:%H${LOG_FIELD_SEP}%B${LOG_RECORD_SEP}`,
+      ...(maxCount ? [`--max-count=${maxCount}`] : []),
       ...(range ? [range] : []),
     ]);
     return raw
